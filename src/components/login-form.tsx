@@ -21,6 +21,9 @@ function getAuthErrorMessage() {
 
 export function LoginForm() {
   const [message, setMessage] = useState(() => getAuthErrorMessage());
+  const [email, setEmail] = useState("s4169571@student.rmit.edu.au");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -35,29 +38,71 @@ export function LoginForm() {
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        const form = new FormData(event.currentTarget);
         setMessage("");
         startTransition(async () => {
-          const response = await fetch("/api/auth/login", {
+          const response = await fetch(codeSent ? "/api/auth/verify-otp" : "/api/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: form.get("email") }),
+            body: JSON.stringify(codeSent ? { email, token: code } : { email }),
           });
           const data = await response.json();
+
+          if (!response.ok) {
+            setMessage(data.error);
+            return;
+          }
+
+          if (codeSent) {
+            window.location.href = data.redirectTo || "/dashboard";
+            return;
+          }
+
+          setCodeSent(true);
           setMessage(
-            response.ok
-              ? data.demo
-                ? data.message
-                : "Check your email for a magic link."
-              : data.error,
+            data.demo
+              ? data.message
+              : "Check your email for the 6-digit sign-in code, then enter it below.",
           );
         });
       }}
     >
-      <Input name="email" type="email" placeholder="s4169571@student.rmit.edu.au" required />
+      <Input
+        name="email"
+        type="email"
+        placeholder="s4169571@student.rmit.edu.au"
+        required
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+      />
+      {codeSent ? (
+        <Input
+          name="code"
+          inputMode="numeric"
+          maxLength={6}
+          pattern="\d{6}"
+          placeholder="6-digit code"
+          required
+          value={code}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+        />
+      ) : null}
       <Button className="w-full" disabled={pending} type="submit">
-        Send magic link
+        {codeSent ? "Verify code" : "Send sign-in code"}
       </Button>
+      {codeSent ? (
+        <button
+          className="text-sm font-medium text-primary"
+          disabled={pending}
+          type="button"
+          onClick={() => {
+            setCode("");
+            setCodeSent(false);
+            setMessage("");
+          }}
+        >
+          Use a different email
+        </button>
+      ) : null}
       {message ? <p className="text-sm text-muted">{message}</p> : null}
     </form>
   );

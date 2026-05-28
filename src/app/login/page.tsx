@@ -7,7 +7,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
-          <p className="text-sm text-muted">Use your allowed RMIT email to open the private dashboard.</p>
+          <p className="text-sm text-muted">Use your allowed RMIT email to receive a one-time sign-in code.</p>
         </CardHeader>
         <CardContent>
           <LoginForm />
