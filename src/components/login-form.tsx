@@ -61,7 +61,7 @@ export function LoginForm() {
           setMessage(
             data.demo
               ? data.message
-              : "Check your email for the 6-digit sign-in code, then enter it below.",
+              : "Check your email for the sign-in code, then enter it below.",
           );
         });
       }}
@@ -78,12 +78,12 @@ export function LoginForm() {
         <Input
           name="code"
           inputMode="numeric"
-          maxLength={6}
-          pattern="\d{6}"
-          placeholder="6-digit code"
+          maxLength={10}
+          pattern="\d{6,10}"
+          placeholder="Code from email"
           required
           value={code}
-          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
         />
       ) : null}
       <Button className="w-full" disabled={pending} type="submit">

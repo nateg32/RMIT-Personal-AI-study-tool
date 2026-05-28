@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const verifyOtpSchema = z.object({
   email: z.string().email(),
-  token: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),
+  token: z.string().trim().regex(/^\d{6,10}$/, "Enter the numeric code from your email"),
 });
 
 export async function POST(request: Request) {
