@@ -1,0 +1,79 @@
+import type { DashboardSummary } from "@/lib/types";
+
+export const demoDashboard: DashboardSummary = {
+  userName: "Nathaniel",
+  timezone: "Australia/Sydney",
+  lastSyncAt: null,
+  stale: true,
+  riskLevel: "high",
+  todayMission: [
+    "Submit Cloud Foundations Milestone 2.2 before 11:59 PM.",
+    "Spend 45 minutes on Algorithms Week 12 Quiz.",
+    "Check Software Engineering group progress after the due-date extension.",
+  ],
+  dueToday: [
+    {
+      id: "demo-cloud-22",
+      canvasAssignmentId: 1215560,
+      courseName: "Cloud Foundations",
+      courseCode: "COSC2757",
+      name: "Milestone 2.2 AWS Academy Labs and Activities",
+      dueAt: new Date(Date.now() + 8 * 36e5).toISOString(),
+      pointsPossible: 8,
+      htmlUrl: "https://rmit.instructure.com",
+      workflowState: "unsubmitted",
+    },
+  ],
+  dueThisWeek: [
+    {
+      id: "demo-algo-quiz",
+      canvasAssignmentId: 1220065,
+      courseName: "Algorithms and Analysis",
+      courseCode: "COSC2123",
+      name: "Week 12 Quiz",
+      dueAt: new Date(Date.now() + 2 * 24 * 36e5).toISOString(),
+      pointsPossible: 5,
+      htmlUrl: "https://rmit.instructure.com",
+      workflowState: "unsubmitted",
+    },
+    {
+      id: "demo-cyber-a2",
+      canvasAssignmentId: 1202594,
+      courseName: "Introduction to Cyber Security",
+      courseCode: "INTE2625",
+      name: "Assignment 2: Industry-focused assessment",
+      dueAt: new Date(Date.now() + 5 * 24 * 36e5).toISOString(),
+      pointsPossible: 50,
+      htmlUrl: "https://rmit.instructure.com",
+      workflowState: "unsubmitted",
+    },
+  ],
+  unsubmitted: [],
+  announcements: [
+    {
+      id: "demo-ann-1",
+      courseName: "Software Engineering Fundamentals",
+      title: "Deadline for Assignment 4 is extended by four days.",
+      postedAt: new Date().toISOString(),
+      htmlUrl: "https://rmit.instructure.com",
+    },
+    {
+      id: "demo-ann-2",
+      courseName: "Cloud Foundations",
+      title: "Week 12 lecture rescheduled to Wednesday.",
+      postedAt: new Date(Date.now() - 24 * 36e5).toISOString(),
+      htmlUrl: "https://rmit.instructure.com",
+    },
+  ],
+  files: [
+    {
+      id: "demo-file-1",
+      courseName: "Cloud Foundations",
+      name: "Assignment 3 intro slides.pdf",
+      updatedAtCanvas: new Date().toISOString(),
+      url: "https://rmit.instructure.com",
+    },
+  ],
+};
+
+demoDashboard.unsubmitted = [...demoDashboard.dueToday, ...demoDashboard.dueThisWeek];

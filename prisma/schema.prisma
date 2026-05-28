@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id             String             @id @default(cuid())
+  supabaseUserId String?            @unique
+  name           String
+  email          String             @unique
+  timezone       String             @default("Australia/Sydney")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  canvas         CanvasConnection?
+  courses        Course[]
+  assignments    Assignment[]
+  announcements  Announcement[]
+  files          CanvasFile[]
+  todos          Todo[]
+  studySessions  StudySession[]
+  dailyBriefs    DailyBrief[]
+  snapshots      SyncSnapshot[]
+  auditLogs      AuditLog[]
+
+  @@index([email])
+}
+
+model CanvasConnection {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canvasBaseUrl        String
+  encryptedAccessToken String
+  tokenIv              String
+  tokenAuthTag         String
+  tokenLastRotatedAt   DateTime  @default(now())
+  lastSyncAt           DateTime?
+  syncStatus           String    @default("idle")
+  syncError            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Course {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canvasCourseId Int
+  name           String
+  courseCode     String?
+  term           String?
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  assignments    Assignment[]
+  announcements  Announcement[]
+  files          CanvasFile[]
+  resources      CanvasResource[]
+  todos          Todo[]
+
+  @@unique([userId, canvasCourseId])
+  @@index([userId])
+  @@index([canvasCourseId])
+}
+
+model Assignment {
+  id                 String        @id @default(cuid())
+  userId             String
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId           String
+  course             Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  canvasAssignmentId Int
+  name               String
+  description        String?
+  dueAt              DateTime?
+  lockAt             DateTime?
+  pointsPossible     Float?
+  htmlUrl            String?
+  submissionTypes    Json?
+  rubric             Json?
+  rubricSummary      String?
+  createdAtCanvas    DateTime?
+  updatedAtCanvas    DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  submission         Submission?
+  todos              Todo[]
+  studySessions      StudySession[]
+
+  @@unique([courseId, canvasAssignmentId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([canvasAssignmentId])
+  @@index([dueAt])
+  @@index([createdAt])
+}
+
+model CanvasResource {
+  id                 String   @id @default(cuid())
+  userId             String
+  courseId           String
+  course             Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  canvasModuleItemId Int
+  canvasContentId    Int?
+  moduleName         String?
+  title              String
+  resourceType       String
+  htmlUrl            String?
+  externalUrl        String?
+  pageUrl            String?
+  position           Int?
+  published          Boolean?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([courseId, canvasModuleItemId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([canvasModuleItemId])
+  @@index([resourceType])
+  @@index([createdAt])
+}
+
+model Submission {
+  id            String      @id @default(cuid())
+  assignmentId  String      @unique
+  assignment    Assignment  @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  submittedAt   DateTime?
+  workflowState String?
+  score         Float?
+  grade         String?
+  late          Boolean     @default(false)
+  missing       Boolean     @default(false)
+  attempt       Int?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([assignmentId])
+  @@index([submittedAt])
+}
+
+model Announcement {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId             String
+  course               Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  canvasAnnouncementId Int
+  title                String
+  message              String?
+  postedAt             DateTime?
+  htmlUrl              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([courseId, canvasAnnouncementId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([postedAt])
+  @@index([createdAt])
+}
+
+model CanvasFile {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  canvasFileId    Int
+  name            String
+  url             String?
+  contentType     String?
+  size            Int?
+  createdAtCanvas DateTime?
+  updatedAtCanvas DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([courseId, canvasFileId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([canvasFileId])
+  @@index([createdAt])
+}
+
+model Todo {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  courseId     String?
+  course       Course?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  status       String      @default("open")
+  priority     String      @default("medium")
+  dueAt        DateTime?
+  source       String      @default("manual")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([courseId])
+  @@index([assignmentId])
+  @@index([dueAt])
+  @@index([createdAt])
+}
+
+model StudySession {
+  id                String      @id @default(cuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignmentId       String?
+  assignment         Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  title             String
+  durationMinutes   Int
+  mode              String
+  targetOutcome     String
+  energyLevel       String
+  generatedPlanJson Json
+  status            String      @default("planned")
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([assignmentId])
+  @@index([createdAt])
+}
+
+model DailyBrief {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          String
+  summary       String
+  riskLevel     String
+  generatedJson Json
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SyncSnapshot {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  sourceId  String
+  hash      String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, type, sourceId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}

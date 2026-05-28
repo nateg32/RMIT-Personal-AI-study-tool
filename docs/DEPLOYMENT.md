@@ -1,0 +1,53 @@
+# Deployment Guide
+
+## Supabase
+
+Use Supabase Postgres for data and Supabase Auth for private login.
+
+Required variables:
+
+- `DATABASE_URL` or Supabase Marketplace `POSTGRES_PRISMA_URL`
+- `DIRECT_URL` or Supabase Marketplace `POSTGRES_URL_NON_POOLING`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
+
+Configure magic-link redirects in Supabase Auth to include:
+
+- `http://localhost:3000/auth/callback`
+- your Vercel production URL `/auth/callback`
+
+## Vercel
+
+Required variables:
+
+- `ALLOWED_EMAILS`
+- `APP_BASE_URL`
+- `ENCRYPTION_KEY`
+- `CRON_SECRET`
+- `GEMINI_API_KEY` if AI generation is enabled
+- `GEMINI_MODEL` defaults to `gemini-3.1-pro-preview`
+- `CANVAS_BASE_URL`
+
+Vercel Cron calls `/api/cron/daily-brief`. The route rejects requests unless the `Authorization` header matches `Bearer ${CRON_SECRET}`.
+
+## Database
+
+Run locally:
+
+```bash
+npm run prisma:generate
+npm run db:push
+npm run db:seed
+```
+
+For production, run migrations through a controlled release step before promoting a deployment.
+
+After schema changes, apply the Prisma schema to Supabase before using sync:
+
+```bash
+npm run prisma:generate
+npm run db:push
+```
+
+The current schema stores assignment descriptions, rubric summaries, rubric JSON, synced files, and module resources so the AI can answer with Canvas-backed detail.
