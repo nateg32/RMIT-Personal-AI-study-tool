@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
-import { getAllowedEmails } from "@/lib/env";
+import { env, getAllowedEmails } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const loginSchema = z.object({
   email: z.string().email(),
 });
+
+function getEmailRedirectUrl(request: Request) {
+  const baseUrl = env.APP_BASE_URL || new URL(request.url).origin;
+  return new URL("/auth/callback", baseUrl).toString();
+}
 
 export async function POST(request: Request) {
   try {
@@ -28,7 +33,7 @@ export async function POST(request: Request) {
     const { error } = await supabase.auth.signInWithOtp({
       email: normalized,
       options: {
-        emailRedirectTo: new URL("/auth/callback", request.url).toString(),
+        emailRedirectTo: getEmailRedirectUrl(request),
       },
     });
     if (error) throw error;

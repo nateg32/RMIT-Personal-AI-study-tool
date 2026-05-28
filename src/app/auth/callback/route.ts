@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { env } from "@/lib/env";
+
+function publicUrl(path: string) {
+  return new URL(path, env.APP_BASE_URL || "http://localhost:3000");
+}
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -10,7 +15,7 @@ export async function GET(request: Request) {
   const supabase = await createSupabaseServerClient();
 
   if (queryError) {
-    const loginUrl = new URL("/login", requestUrl.origin);
+    const loginUrl = publicUrl("/login");
     loginUrl.searchParams.set("error", errorDescription);
     return NextResponse.redirect(loginUrl);
   }
@@ -18,11 +23,11 @@ export async function GET(request: Request) {
   if (code && supabase) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      const loginUrl = new URL("/login", requestUrl.origin);
+      const loginUrl = publicUrl("/login");
       loginUrl.searchParams.set("error", error.message);
       return NextResponse.redirect(loginUrl);
     }
   }
 
-  return NextResponse.redirect(new URL("/dashboard", requestUrl.origin));
+  return NextResponse.redirect(publicUrl("/dashboard"));
 }
