@@ -1,14 +1,14 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getFilesForUser } from "@/lib/data/lists";
 import { formatDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function FilesPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const files = await getFilesForUser(user);
 
   return (

@@ -8,14 +8,14 @@ import { SyncButton } from "@/components/sync-button";
 import { BorderRotate } from "@/components/ui/animated-gradient-border";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getDashboardData } from "@/lib/data/dashboard";
 import { formatDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const dashboard = await getDashboardData(user);
 
   return (

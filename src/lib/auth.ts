@@ -1,8 +1,16 @@
 import { cache } from "react";
 import type { User } from "@prisma/client";
+import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getAllowedEmails, isProductionRuntime, isSupabaseConfigured } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super("Authentication required");
+    this.name = "AuthenticationRequiredError";
+  }
+}
 
 const demoUser = {
   id: "demo-user",
@@ -26,7 +34,7 @@ export const getCurrentUser = cache(async (): Promise<User> => {
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase!.auth.getUser();
-  if (error || !data.user?.email) throw new Error("Authentication required");
+  if (error || !data.user?.email) throw new AuthenticationRequiredError();
 
   const email = data.user.email.toLowerCase();
   if (allowed.size > 0 && !allowed.has(email)) {
@@ -51,6 +59,17 @@ export const getCurrentUser = cache(async (): Promise<User> => {
 
 export async function requireUser() {
   return getCurrentUser();
+}
+
+export async function requirePageUser() {
+  try {
+    return await getCurrentUser();
+  } catch (error) {
+    if (error instanceof AuthenticationRequiredError) {
+      redirect("/login");
+    }
+    throw error;
+  }
 }
 
 export function isDemoUser(user: User) {

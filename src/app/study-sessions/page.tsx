@@ -4,13 +4,13 @@ import { PageHeader } from "@/components/page-header";
 import { StudySessionRunner } from "@/components/study-session-runner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getStudySessionsForUser } from "@/lib/data/lists";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudySessionsPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const sessions = await getStudySessionsForUser(user);
 
   return (

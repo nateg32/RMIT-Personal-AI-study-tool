@@ -2,10 +2,13 @@ import { CanvasConnectForm } from "@/components/canvas-connect-form";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requirePageUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requirePageUser();
+
   return (
     <AppShell>
       <PageHeader eyebrow="Private setup" title="Settings" description="Connect Canvas and manage server-side secrets." />

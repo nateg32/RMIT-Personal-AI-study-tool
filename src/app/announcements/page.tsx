@@ -2,14 +2,14 @@ import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getAnnouncementsForUser } from "@/lib/data/lists";
 import { formatDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function AnnouncementsPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const announcements = await getAnnouncementsForUser(user);
 
   return (

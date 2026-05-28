@@ -1,13 +1,13 @@
 import { AppShell } from "@/components/app-shell";
 import { AssignmentsClient } from "@/components/assignments-client";
 import { PageHeader } from "@/components/page-header";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getAssignmentsForUser } from "@/lib/data/lists";
 
 export const dynamic = "force-dynamic";
 
 export default async function AssignmentsPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const assignments = await getAssignmentsForUser(user);
 
   return (

@@ -1,13 +1,13 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getCoursesForUser } from "@/lib/data/lists";
 
 export const dynamic = "force-dynamic";
 
 export default async function CoursesPage() {
-  const user = await requireUser();
+  const user = await requirePageUser();
   const courses = await getCoursesForUser(user);
 
   return (
