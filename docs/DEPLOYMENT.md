@@ -47,7 +47,10 @@ After schema changes, apply the Prisma schema to Supabase before using sync:
 
 ```bash
 npm run prisma:generate
-npm run db:push
+$env:SUPABASE_DB_URL="postgresql://postgres.<project-ref>:<password>@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
+npm run db:push:supabase
 ```
 
 The current schema stores assignment descriptions, rubric summaries, rubric JSON, synced files, and module resources so the AI can answer with Canvas-backed detail.
+
+Do not use the direct `db.<project-ref>.supabase.co:5432` URL from this Windows workspace unless IPv6 is available. Supabase direct connections resolve to IPv6; the session pooler is IPv4-compatible.
