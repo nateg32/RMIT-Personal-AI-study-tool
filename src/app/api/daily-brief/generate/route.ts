@@ -5,6 +5,8 @@ import { env } from "@/lib/env";
 import { getDashboardData } from "@/lib/data/dashboard";
 import { generateDailyBrief } from "@/lib/ai/gemini";
 
+export const maxDuration = 60;
+
 export async function POST() {
   try {
     const user = await requireUser();

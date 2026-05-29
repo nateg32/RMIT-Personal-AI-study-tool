@@ -13,6 +13,18 @@ import {
   isAssignmentVisible,
 } from "@/lib/data/preferences";
 
+export type GeminiReadableManualMaterial = {
+  id: string;
+  name: string;
+  contentType: string;
+  base64Data: string;
+  size: number;
+  courseName?: string | null;
+  assignmentName?: string | null;
+  notes?: string | null;
+  extractedText?: string | null;
+};
+
 const RESOURCE_KEYWORDS = [
   "assignment",
   "assessment",
@@ -61,6 +73,25 @@ function criteriaFromRubricSummary(summary: string | null | undefined) {
 
 function excerpt(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim().slice(0, 1_500) || null;
+}
+
+function indexedMaterialText(file: ManualMaterialMetadata) {
+  return [file.notes, file.extractedText].filter(Boolean).join("\n\n");
+}
+
+function toGeminiReadableMaterial(file: ManualMaterialMetadata): GeminiReadableManualMaterial | null {
+  if (!file.geminiFile?.base64Data || !file.geminiFile.mimeType) return null;
+  return {
+    id: file.id,
+    name: file.name,
+    contentType: file.geminiFile.mimeType,
+    base64Data: file.geminiFile.base64Data,
+    size: file.geminiFile.size,
+    courseName: file.courseName,
+    assignmentName: file.assignmentName,
+    notes: file.notes,
+    extractedText: file.extractedText,
+  };
 }
 
 function stringArray(value: unknown) {
@@ -196,7 +227,7 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
 
   const relatedUploadedFiles = uploadedFiles
     .map((file) => {
-      const indexedText = [file.notes, file.extractedText].filter(Boolean).join("\n\n");
+      const indexedText = indexedMaterialText(file);
       return {
         score: scoreText(
           queryWords,
@@ -332,7 +363,7 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
             (!file.assignmentId && file.courseId === assignment.courseId) ||
             (!file.assignmentId && !file.courseId),
         )
-        .map((file) => `${file.name} ${file.notes || ""} ${file.extractedText || ""}`)
+        .map((file) => `${file.name} ${indexedMaterialText(file)}`)
         .join(" ");
       const text = `${assignment.name} ${assignment.description || ""} ${assignment.course.name} ${
         assignment.course.courseCode || ""
@@ -391,7 +422,7 @@ export async function getChatManualMaterialsForUser(user: User, message: string)
 
   return materials
     .map((file) => {
-      const indexedText = [file.notes, file.extractedText].filter(Boolean).join("\n\n");
+      const indexedText = indexedMaterialText(file);
       return {
         score:
           scoreText(
@@ -406,6 +437,84 @@ export async function getChatManualMaterialsForUser(user: User, message: string)
     .sort((a, b) => b.score - a.score)
     .slice(0, messageWords.size > 0 ? 10 : 6)
     .map((item) => item.text);
+}
+
+export async function getChatGeminiMaterialsForUser(user: User, message: string) {
+  if (isDemoUser(user) || !env.DATABASE_URL) return [];
+
+  const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const snapshots = await db.syncSnapshot.findMany({
+    where: { userId: user.id, type: "manual_upload" },
+    select: { metadata: true },
+    orderBy: [{ createdAt: "desc" }],
+    take: 120,
+  });
+  const materials = filterManualMaterials(
+    snapshots
+      .map((snapshot) => parseManualMaterial(snapshot.metadata))
+      .filter((file): file is ManualMaterialMetadata => Boolean(file)),
+    preferences,
+  );
+  const messageWords = words(message);
+
+  return materials
+    .map((file) => ({
+      score:
+        scoreText(
+          messageWords,
+          `${file.name} ${file.courseName || ""} ${file.assignmentName || ""} ${file.contentType || ""} ${indexedMaterialText(file)}`,
+        ) + (message.toLowerCase().includes(file.name.toLowerCase()) ? 20 : 0),
+      material: toGeminiReadableMaterial(file),
+    }))
+    .filter((item): item is { score: number; material: GeminiReadableManualMaterial } => Boolean(item.material))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, messageWords.size > 0 ? 2 : 1)
+    .map((item) => item.material);
+}
+
+export async function getStudySessionGeminiMaterialsForUser(
+  user: User,
+  input: { assignmentId?: string | null; courseId?: string | null; query?: string | null },
+) {
+  if (isDemoUser(user) || !env.DATABASE_URL) return [];
+
+  const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const snapshots = await db.syncSnapshot.findMany({
+    where: { userId: user.id, type: "manual_upload" },
+    select: { metadata: true },
+    orderBy: [{ createdAt: "desc" }],
+    take: 120,
+  });
+  const materials = filterManualMaterials(
+    snapshots
+      .map((snapshot) => parseManualMaterial(snapshot.metadata))
+      .filter((file): file is ManualMaterialMetadata => Boolean(file)),
+    preferences,
+  );
+  const queryWords = words(input.query || "");
+
+  return materials
+    .filter(
+      (file) =>
+        !input.assignmentId ||
+        file.assignmentId === input.assignmentId ||
+        (!file.assignmentId && input.courseId && file.courseId === input.courseId) ||
+        (!file.assignmentId && !file.courseId),
+    )
+    .map((file) => ({
+      score:
+        scoreText(
+          queryWords,
+          `${file.name} ${file.courseName || ""} ${file.assignmentName || ""} ${file.contentType || ""} ${indexedMaterialText(file)}`,
+        ) + (file.assignmentId === input.assignmentId ? 12 : 0),
+      material: toGeminiReadableMaterial(file),
+    }))
+    .filter((item): item is { score: number; material: GeminiReadableManualMaterial } => Boolean(item.material))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)
+    .map((item) => item.material);
 }
 
 export async function getCustomFocusContextForUser(
@@ -478,7 +587,7 @@ export async function getCustomFocusContextForUser(
       type: "Manual upload",
       moduleName: file.assignmentName || file.courseName || "Manual library",
       url: null,
-      excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
+      excerpt: excerpt(indexedMaterialText(file)),
     })),
     relatedResources: [],
     recentAnnouncements: [],

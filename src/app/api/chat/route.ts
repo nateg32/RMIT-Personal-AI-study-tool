@@ -2,7 +2,11 @@ import { z } from "zod";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { getDashboardData } from "@/lib/data/dashboard";
-import { getChatAssignmentContextsForUser, getChatManualMaterialsForUser } from "@/lib/data/assignment-context";
+import {
+  getChatAssignmentContextsForUser,
+  getChatGeminiMaterialsForUser,
+  getChatManualMaterialsForUser,
+} from "@/lib/data/assignment-context";
 import { chatWithCanvasContext } from "@/lib/ai/gemini";
 import { rateLimit } from "@/lib/rate-limit";
 import type { CanvasAssignmentSummary } from "@/lib/types";
@@ -36,9 +40,10 @@ export async function POST(request: Request) {
     if (!limit.ok) return jsonError(new Error("Too many chat requests"), 429);
     const { message } = await parseJson(request, chatSchema);
     const dashboard = await getDashboardData(user);
-    const [assignmentContexts, manualMaterials] = await Promise.all([
+    const [assignmentContexts, manualMaterials, geminiMaterials] = await Promise.all([
       getChatAssignmentContextsForUser(user, message),
       getChatManualMaterialsForUser(user, message),
+      getChatGeminiMaterialsForUser(user, message),
     ]);
     const answer = await chatWithCanvasContext({
       message,
@@ -60,6 +65,7 @@ export async function POST(request: Request) {
         ),
       ]).slice(0, 18),
       assignmentContexts,
+      mediaMaterials: geminiMaterials,
     });
     return jsonOk({ ...answer, lastSyncAt: dashboard.lastSyncAt });
   } catch (error) {

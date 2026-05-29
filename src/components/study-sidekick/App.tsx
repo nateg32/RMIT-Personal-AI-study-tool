@@ -222,15 +222,61 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
 
   const syncCanvas = useCallback(async () => {
     setIsSyncing(true);
-    setActionMessage("Syncing Canvas courses, assignments, submissions, and key announcements...");
+    setActionMessage("Preparing Canvas sync and checking your visible courses...");
     try {
-      const summary = await apiJson<{ courses: number; changes?: Array<{ label: string }>; warnings?: string[] }>("/api/canvas/sync", {
+      const prepared = await apiJson<{
+        courses: Array<{ canvasCourseId: number; name: string; courseCode?: string | null }>;
+        skippedCourses?: number;
+      }>("/api/canvas/sync", { method: "POST" });
+
+      const courseCount = prepared.courses.length;
+      const changes: Array<{ label: string }> = [];
+      const warnings: string[] = [];
+      let successfulCourses = 0;
+
+      for (let index = 0; index < courseCount; index += 1) {
+        const course = prepared.courses[index];
+        setActionMessage(`Syncing ${index + 1}/${courseCount}: ${course.name}...`);
+        try {
+          const courseSummary = await apiJson<{
+            assignments: number;
+            changes?: Array<{ label: string }>;
+            warnings?: string[];
+          }>("/api/canvas/sync/course", {
+            method: "POST",
+            body: JSON.stringify({
+              canvasCourseId: course.canvasCourseId,
+              includeResources: true,
+            }),
+          });
+          successfulCourses += 1;
+          changes.push(...(courseSummary.changes || []));
+          warnings.push(...(courseSummary.warnings || []));
+        } catch (error) {
+          warnings.push(`${course.name}: ${error instanceof Error ? error.message : "course sync failed"}`);
+        }
+      }
+
+      const syncError =
+        courseCount > 0 && successfulCourses === 0
+          ? warnings[0] || "No Canvas courses synced successfully."
+          : null;
+      await apiJson("/api/canvas/sync/finish", {
         method: "POST",
+        body: JSON.stringify({
+          syncError,
+          successfulCourses,
+          totalCourses: courseCount,
+          changeCount: changes.length,
+          warnings: warnings.slice(0, 10),
+        }),
       });
+
       await refreshData();
-      const changeCount = summary.changes?.length || 0;
-      const warningText = summary.warnings?.length ? ` ${summary.warnings.length} course warnings were skipped to avoid timeout.` : "";
-      setActionMessage(`Canvas sync complete: ${summary.courses} courses checked, ${changeCount} changes detected.${warningText}`);
+      const warningText = warnings.length ? ` ${warnings.length} course warnings were kept so the sync could finish.` : "";
+      setActionMessage(
+        `Canvas sync complete: ${successfulCourses}/${courseCount} courses synced, ${changes.length} changes detected.${warningText}`,
+      );
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Canvas sync failed.");
     } finally {
@@ -400,13 +446,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       if (input.assignmentId) formData.append("assignmentId", input.assignmentId);
 
       try {
-        await apiJson<{ id: string; name: string; hasIndexedText: boolean }>("/api/uploads", {
+        const result = await apiJson<{ id: string; name: string; hasIndexedText: boolean; deepReadStatus?: string }>("/api/uploads", {
           method: "POST",
           body: formData,
         });
         await refreshData();
         setActionMessage(
-          "Material saved. AI chat and new study sessions can now use it alongside Canvas assignments, courses, and announcements.",
+          result.deepReadStatus === "gemini_file"
+            ? "Material saved for Gemini deep reading. AI chat and new study sessions can now inspect it alongside Canvas context."
+            : "Material saved. AI chat and new study sessions can now use it alongside Canvas assignments, courses, and announcements.",
         );
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Material upload failed.");

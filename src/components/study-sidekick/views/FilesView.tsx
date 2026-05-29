@@ -129,7 +129,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
             <h2 className="font-headline-md text-headline-md text-primary">Upload study material</h2>
           </div>
           <p className="font-body-md text-body-md text-on-surface-variant mb-md max-w-3xl">
-            Add assignment briefs, lecture notes, rubric text, or slides when Canvas file syncing is slow. DOCX and text files are indexed automatically; for PDFs, slides, or images, paste the key brief/rubric notes so AI can use them.
+            Add assignment briefs, lecture notes, rubric text, slides, PDFs, or screenshots when Canvas file syncing is slow. Text and DOCX are indexed locally; small PDFs, images, and PowerPoint files are attached to Gemini for deeper reading during chat and new study sessions.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
             <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">
@@ -137,6 +137,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
               <input
                 type="file"
                 className="font-label-md text-label-md min-w-0"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.ppt,.pptx,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,text/*,image/*,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
               />
             </label>
@@ -166,7 +167,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
             <textarea
               value={uploadNotes}
               onChange={(event) => setUploadNotes(event.target.value)}
-              placeholder="Paste brief/rubric/lecture highlights for PDFs, slides, screenshots, or anything Canvas will not sync..."
+              placeholder="Optional: paste any extra brief/rubric/lecture highlights, especially for large or blurry PDFs, slides, or screenshots..."
               className="bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
             />
           </div>
@@ -186,7 +187,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
             <h2 className="font-headline-sm text-headline-sm">Cheapest path</h2>
           </div>
           <p className="font-body-md text-body-md text-on-surface-variant">
-            Manual notes are cheaper than forcing Canvas to fetch every file because we only store searchable text snippets. Full binary storage and deep PDF parsing can come later with Supabase Storage if you need downloads.
+            Manual uploads are cheaper than forcing Canvas to fetch every file. PDFs, slides, and images under 4 MB can be deep-read by Gemini; huge files should be trimmed or summarised first so chat stays fast.
           </p>
         </div>
       </section>

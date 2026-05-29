@@ -36,7 +36,8 @@ export async function POST(request: Request) {
       courseName: material.courseName || "Manual library",
       assignmentName: material.assignmentName || null,
       source: "manual_upload",
-      hasIndexedText: Boolean(material.extractedText || material.notes),
+      hasIndexedText: Boolean(material.extractedText || material.notes || material.geminiFile),
+      deepReadStatus: material.deepReadStatus,
     });
   } catch (error) {
     return jsonError(error, 400);

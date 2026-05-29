@@ -553,17 +553,18 @@ export default function StudySessionsView({
                 <h3 className="font-headline-md text-headline-md">Add context before planning</h3>
               </div>
               <p className="font-body-md text-body-md text-on-surface-variant mb-sm">
-                Attach the assignment brief, slides, or paste rubric notes here. The next generated plan will use this material.
+                Attach the assignment brief, slides, PDF, screenshot, or paste rubric notes here. Gemini can deep-read PDFs, images, and PowerPoint files under 4 MB when it builds the next plan.
               </p>
               <input
                 type="file"
                 className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-label-md text-label-md"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.ppt,.pptx,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,text/*,image/*,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={(event) => setSessionUploadFile(event.target.files?.[0] || null)}
               />
               <textarea
                 value={sessionUploadNotes}
                 onChange={(event) => setSessionUploadNotes(event.target.value)}
-                placeholder="Paste brief/rubric/lecture slide highlights if the file is a PDF, image, or PowerPoint..."
+                placeholder="Optional: paste extra brief/rubric/lecture highlights, especially for large or blurry files..."
                 className="mt-sm w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
               />
               <button

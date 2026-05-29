@@ -3,7 +3,11 @@ import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { requireUser, isDemoUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { getAssignmentContextForUser, getCustomFocusContextForUser } from "@/lib/data/assignment-context";
+import {
+  getAssignmentContextForUser,
+  getCustomFocusContextForUser,
+  getStudySessionGeminiMaterialsForUser,
+} from "@/lib/data/assignment-context";
 import { getAssignmentsForUser, getStudySessionsForUser } from "@/lib/data/lists";
 import { generateStudySession } from "@/lib/ai/gemini";
 import { env } from "@/lib/env";
@@ -45,9 +49,15 @@ export async function POST(request: Request) {
           focus: input.customFocus,
         });
     if (!context) return jsonError(new Error("Study session context not found"), 404);
+    const mediaMaterials = await getStudySessionGeminiMaterialsForUser(user, {
+      assignmentId: assignment?.id || null,
+      courseId: context.course.id,
+      query: `${context.assignment.name} ${context.assignment.description || ""} ${input.customFocus || ""}`,
+    });
 
     const plan = await generateStudySession({
       context,
+      mediaMaterials,
       durationMinutes: input.durationMinutes,
       mode: input.mode,
       energyLevel: input.energyLevel,

@@ -16,13 +16,45 @@ export function SyncButton() {
         onClick={() => {
           setMessage("");
           startTransition(async () => {
-            const response = await fetch("/api/canvas/sync", { method: "POST" });
-            const data = await response.json();
-            setMessage(
-              response.ok
-                ? `Synced ${data.courses || 0} courses`
-                : data.error || "Sync failed",
-            );
+            const prepareResponse = await fetch("/api/canvas/sync", { method: "POST" });
+            const prepared = await prepareResponse.json();
+            if (!prepareResponse.ok) {
+              setMessage(prepared.error || "Sync failed");
+              return;
+            }
+
+            let successfulCourses = 0;
+            const warnings: string[] = [];
+            for (const course of prepared.courses || []) {
+              const response = await fetch("/api/canvas/sync/course", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ canvasCourseId: course.canvasCourseId, includeResources: true }),
+              });
+              const data = await response.json().catch(() => ({}));
+              if (response.ok) {
+                successfulCourses += 1;
+                warnings.push(...(data.warnings || []));
+              } else {
+                warnings.push(`${course.name}: ${data.error || "course sync failed"}`);
+              }
+            }
+
+            await fetch("/api/canvas/sync/finish", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                successfulCourses,
+                totalCourses: prepared.courses?.length || 0,
+                warnings: warnings.slice(0, 10),
+                syncError:
+                  prepared.courses?.length && successfulCourses === 0
+                    ? warnings[0] || "No Canvas courses synced successfully"
+                    : null,
+              }),
+            });
+
+            setMessage(`Synced ${successfulCourses}/${prepared.courses?.length || 0} courses`);
           });
         }}
       >

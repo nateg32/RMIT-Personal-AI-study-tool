@@ -1,7 +1,7 @@
 import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { syncCanvasForUser } from "@/lib/canvas/sync";
+import { prepareCanvasSyncForUser } from "@/lib/canvas/sync";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const maxDuration = 60;
@@ -12,8 +12,8 @@ export async function POST() {
     user = await requireUser();
     const allowed = rateLimit(`sync:${user.id}`, 5, 60_000);
     if (!allowed.ok) return jsonError(new Error("Too many sync requests"), 429);
-    const summary = await syncCanvasForUser(user);
-    await auditLog({ userId: user.id, action: "canvas.synced", metadata: summary });
+    const summary = await prepareCanvasSyncForUser(user);
+    await auditLog({ userId: user.id, action: "canvas.sync_started", metadata: summary });
     return jsonOk(summary);
   } catch (error) {
     if (user?.id) {

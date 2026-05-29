@@ -63,7 +63,11 @@ describe("CanvasClient", () => {
   });
 
   it("requests assignment submissions, date overrides, and module items for richer context", async () => {
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]))));
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 456, name: "Assignment" })))
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]))));
 
     const client = new CanvasClient({
       baseUrl: "https://canvas.test",
@@ -72,6 +76,7 @@ describe("CanvasClient", () => {
     });
 
     await client.getAssignmentsWithSubmissions(123);
+    await client.getAssignmentDetails(123, 456);
     await client.getCourseModulesWithItems(123);
     await client.getCourseAnnouncements(123);
 
@@ -81,17 +86,17 @@ describe("CanvasClient", () => {
       expect.objectContaining({ headers: expect.any(Object) }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining("include[]=all_dates"),
-      expect.objectContaining({ headers: expect.any(Object) }),
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining("include[]=items"),
+      expect.stringContaining("all_dates=true"),
       expect.objectContaining({ headers: expect.any(Object) }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(
       3,
+      expect.stringContaining("include[]=items"),
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      4,
       expect.stringContaining("only_announcements=true"),
       expect.objectContaining({ headers: expect.any(Object) }),
     );

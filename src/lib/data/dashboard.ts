@@ -314,7 +314,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
         createdAt: file.createdAt,
         url: null,
         source: "manual_upload" as const,
-        hasIndexedText: Boolean(file.extractedText || file.notes),
+        hasIndexedText: Boolean(file.extractedText || file.notes || file.geminiFile),
         excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
       })),
       ...files.map((file) => ({

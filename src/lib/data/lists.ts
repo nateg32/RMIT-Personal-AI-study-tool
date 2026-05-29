@@ -137,7 +137,7 @@ export async function getFilesForUser(user: User) {
       createdAt: file.createdAt,
       url: null,
       source: "manual_upload" as const,
-      hasIndexedText: Boolean(file.extractedText || file.notes),
+      hasIndexedText: Boolean(file.extractedText || file.notes || file.geminiFile),
       excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
     })),
     ...canvasFiles.map((file) => ({

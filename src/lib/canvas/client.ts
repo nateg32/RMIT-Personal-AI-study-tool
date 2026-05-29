@@ -145,7 +145,7 @@ export class CanvasClient {
 
   async getAssignmentsWithSubmissions(courseId: number) {
     return this.getAllPages<CanvasAssignment>(
-      `/api/v1/courses/${courseId}/assignments?include[]=submission&include[]=all_dates&include[]=overrides&include[]=score_statistics&order_by=due_at&per_page=100`,
+      `/api/v1/courses/${courseId}/assignments?include[]=submission&order_by=due_at&per_page=100`,
     );
   }
 
