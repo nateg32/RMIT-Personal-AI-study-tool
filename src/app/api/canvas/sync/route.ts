@@ -5,14 +5,24 @@ import { syncCanvasForUser } from "@/lib/canvas/sync";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST() {
+  let user: Awaited<ReturnType<typeof requireUser>> | null = null;
   try {
-    const user = await requireUser();
+    user = await requireUser();
     const allowed = rateLimit(`sync:${user.id}`, 5, 60_000);
     if (!allowed.ok) return jsonError(new Error("Too many sync requests"), 429);
     const summary = await syncCanvasForUser(user);
     await auditLog({ userId: user.id, action: "canvas.synced", metadata: summary });
     return jsonOk(summary);
   } catch (error) {
+    if (user?.id) {
+      await auditLog({
+        userId: user.id,
+        action: "canvas.sync_failed",
+        metadata: {
+          error: error instanceof Error ? error.message : "Unknown Canvas sync error",
+        },
+      });
+    }
     return jsonError(error, 500);
   }
 }

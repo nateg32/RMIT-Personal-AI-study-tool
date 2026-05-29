@@ -94,6 +94,21 @@ export type CourseDashboardSummary = {
   nextAssignment?: AssignmentSummary | null;
 };
 
+export type CanvasConnectionMode = "saved_token" | "environment" | "not_connected";
+
+export type CanvasSyncState = "not_connected" | "syncing" | "success" | "error" | "never_synced";
+
+export type CanvasSyncSummary = {
+  visibleCourses: number;
+  hiddenCourses: number;
+  assignments: number;
+  unsubmittedAssignments: number;
+  announcements: number;
+  files: number;
+  resources: number;
+  manualMaterials: number;
+};
+
 export type StudyBlock = {
   name: string;
   minutes: number;
@@ -172,7 +187,13 @@ export type DashboardSummary = {
   userName: string;
   timezone: string;
   lastSyncAt?: string | null;
+  lastSuccessfulSyncAt?: string | null;
+  lastSyncAttemptAt?: string | null;
   canvasConfigured?: boolean;
+  canvasConnectionMode?: CanvasConnectionMode;
+  syncStatus?: CanvasSyncState;
+  syncError?: string | null;
+  syncSummary?: CanvasSyncSummary;
   stale: boolean;
   todayMission: string[];
   dueToday: AssignmentSummary[];

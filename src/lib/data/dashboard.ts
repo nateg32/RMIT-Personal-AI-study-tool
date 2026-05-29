@@ -63,6 +63,18 @@ function excerpt(value?: string | null) {
   return value?.replace(/\s+/g, " ").trim().slice(0, 220) || null;
 }
 
+function latestDate(...values: Array<Date | null | undefined>) {
+  const dates = values.filter((value): value is Date => Boolean(value));
+  if (!dates.length) return null;
+  return new Date(Math.max(...dates.map((date) => date.getTime())));
+}
+
+function metadataErrorMessage(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const error = (metadata as Record<string, unknown>).error;
+  return typeof error === "string" ? error : null;
+}
+
 export async function getDashboardData(user: User): Promise<DashboardSummary> {
   if (isDemoUser(user) || !env.DATABASE_URL) return demoDashboard;
 
@@ -71,16 +83,45 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const todayStart = startOfDay(now);
   const todayEnd = endOfDay(now);
   const weekEnd = addDays(todayEnd, 7);
-  const connection = await db.canvasConnection.findUnique({ where: { userId: user.id } });
-  const latestSync = connection?.lastSyncAt
-    ? null
-    : await db.auditLog.findFirst({
+  const [connection, latestSuccessfulSync, latestFailedSync] = await Promise.all([
+    db.canvasConnection.findUnique({ where: { userId: user.id } }),
+    db.auditLog.findFirst({
         where: { userId: user.id, action: "canvas.synced" },
         orderBy: { createdAt: "desc" },
-        select: { createdAt: true },
-      });
-  const lastSyncAt = connection?.lastSyncAt || latestSync?.createdAt || null;
-  const canvasConfigured = Boolean(connection || (env.CANVAS_BASE_URL && env.CANVAS_ACCESS_TOKEN));
+        select: { createdAt: true, metadata: true },
+      }),
+    db.auditLog.findFirst({
+      where: { userId: user.id, action: "canvas.sync_failed" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, metadata: true },
+    }),
+  ]);
+  const lastSuccessfulSyncAt = latestDate(connection?.lastSyncAt, latestSuccessfulSync?.createdAt);
+  const connectionAttemptAt =
+    connection?.syncStatus === "syncing" || connection?.syncStatus === "error" ? connection.updatedAt : null;
+  const lastSyncAttemptAt = latestDate(lastSuccessfulSyncAt, latestFailedSync?.createdAt, connectionAttemptAt);
+  const envCanvasConfigured = Boolean(env.CANVAS_ACCESS_TOKEN?.trim());
+  const canvasConnectionMode = connection ? "saved_token" : envCanvasConfigured ? "environment" : "not_connected";
+  const canvasConfigured = canvasConnectionMode !== "not_connected";
+  const latestFailureAt = latestDate(
+    latestFailedSync?.createdAt,
+    connection?.syncStatus === "error" ? connection.updatedAt : null,
+  );
+  const failureIsLatest = Boolean(latestFailureAt && (!lastSuccessfulSyncAt || latestFailureAt > lastSuccessfulSyncAt));
+  const syncStatus =
+    !canvasConfigured
+      ? "not_connected"
+      : connection?.syncStatus === "syncing"
+        ? "syncing"
+        : connection?.syncStatus === "error" || failureIsLatest
+          ? "error"
+          : lastSuccessfulSyncAt
+            ? "success"
+            : "never_synced";
+  const syncError =
+    syncStatus === "error"
+      ? connection?.syncError || metadataErrorMessage(latestFailedSync?.metadata) || "The latest Canvas sync failed."
+      : null;
 
   const courses = await db.course.findMany({
     where: { userId: user.id },
@@ -101,6 +142,30 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     .map((assignment) => withPrioritySignals(assignmentSummary(assignment), now));
   const unsubmitted = sortByPriority(
     summaries.filter((item) => !isSubmitted(item)),
+  );
+
+  const [announcementTotal, canvasFileTotal, resourceTotal, manualUploadSnapshots] = await Promise.all([
+    db.announcement.count({
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
+    }),
+    db.canvasFile.count({
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
+    }),
+    db.canvasResource.count({
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
+    }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      select: { metadata: true },
+      orderBy: [{ createdAt: "desc" }],
+      take: 1000,
+    }),
+  ]);
+  const manualMaterials = filterManualMaterials(
+    manualUploadSnapshots
+      .map((snapshot) => parseManualMaterial(snapshot.metadata))
+      .filter((file): file is ManualMaterialMetadata => Boolean(file)),
+    preferences,
   );
 
   const dueToday = unsubmitted.filter((assignment) => {
@@ -163,7 +228,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const visibleUploadedFiles = filterManualMaterials(uploadedFiles, preferences);
   const visibleRecentUploadMaterials = filterManualMaterials(recentUploadMaterials, preferences);
 
-  const stale = !lastSyncAt || lastSyncAt < subHours(now, 12);
+  const stale = !lastSuccessfulSyncAt || lastSuccessfulSyncAt < subHours(now, 12) || syncStatus === "error";
   const priority = unsubmitted.slice(0, 6);
   const courseBreakdown = visibleCourses.map((course) => {
     const courseAssignments = summaries.filter((assignment) => assignment.courseId === course.id);
@@ -197,8 +262,23 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   return {
     userName: user.name.split(" ")[0] || user.name,
     timezone: user.timezone,
-    lastSyncAt: lastSyncAt?.toISOString() || null,
+    lastSyncAt: lastSuccessfulSyncAt?.toISOString() || null,
+    lastSuccessfulSyncAt: lastSuccessfulSyncAt?.toISOString() || null,
+    lastSyncAttemptAt: lastSyncAttemptAt?.toISOString() || null,
     canvasConfigured,
+    canvasConnectionMode,
+    syncStatus,
+    syncError,
+    syncSummary: {
+      visibleCourses: visibleCourses.length,
+      hiddenCourses: Math.max(courses.length - visibleCourses.length, 0),
+      assignments: summaries.length,
+      unsubmittedAssignments: unsubmitted.length,
+      announcements: announcementTotal,
+      files: canvasFileTotal,
+      resources: resourceTotal,
+      manualMaterials: manualMaterials.length,
+    },
     stale,
     riskLevel: getOverallRisk(unsubmitted),
     todayMission:

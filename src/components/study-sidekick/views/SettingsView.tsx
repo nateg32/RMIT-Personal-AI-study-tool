@@ -14,6 +14,44 @@ type SettingsViewProps = {
   onLogout: () => void;
 };
 
+const emptySyncSummary = {
+  visibleCourses: 0,
+  hiddenCourses: 0,
+  assignments: 0,
+  unsubmittedAssignments: 0,
+  announcements: 0,
+  files: 0,
+  resources: 0,
+  manualMaterials: 0,
+};
+
+function formatDate(value?: string | null) {
+  return value ? new Date(value).toLocaleString("en-AU") : "Never";
+}
+
+function connectionLabel(dashboard: DashboardSummary) {
+  if (dashboard.canvasConnectionMode === "saved_token") return "Saved Canvas token";
+  if (dashboard.canvasConnectionMode === "environment") return "Deployment env token";
+  return dashboard.canvasConfigured ? "Configured" : "Not connected";
+}
+
+function syncStatusLabel(dashboard: DashboardSummary, isSyncing?: boolean) {
+  if (isSyncing) return "Syncing now";
+  if (dashboard.syncStatus === "success") return "Last sync succeeded";
+  if (dashboard.syncStatus === "error") return "Last sync failed";
+  if (dashboard.syncStatus === "syncing") return "Syncing now";
+  if (dashboard.syncStatus === "never_synced") return "Connected, never synced";
+  return dashboard.canvasConfigured ? "Ready to sync" : "No Canvas connection";
+}
+
+function freshnessLabel(dashboard: DashboardSummary, isSyncing?: boolean) {
+  if (isSyncing) return "Refreshing";
+  if (!dashboard.canvasConfigured) return "No Canvas connection";
+  if (dashboard.syncStatus === "error") return "Blocked by last sync error";
+  if (!dashboard.lastSuccessfulSyncAt && !dashboard.lastSyncAt) return "No successful sync yet";
+  return dashboard.stale ? "Stale, refresh recommended" : "Fresh";
+}
+
 export default function SettingsView({
   dashboard,
   scope,
@@ -27,6 +65,7 @@ export default function SettingsView({
   const [accessToken, setAccessToken] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const syncSummary = dashboard.syncSummary || emptySyncSummary;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -114,30 +153,60 @@ export default function SettingsView({
 
           <aside className="lg:col-span-5 space-y-gutter">
             <div className="bg-primary-container/30 border-2 border-primary-fixed-dim rounded-lg p-md bubbly-shadow">
-              <div className="flex items-center gap-sm mb-sm">
-                <span className="material-symbols-outlined text-primary">cloud_done</span>
-                <h3 className="font-headline-md text-headline-md text-primary">Sync status</h3>
+              <div className="flex items-start justify-between gap-sm mb-sm">
+                <div className="flex items-center gap-sm">
+                  <span className="material-symbols-outlined text-primary">cloud_done</span>
+                  <h3 className="font-headline-md text-headline-md text-primary">Sync status</h3>
+                </div>
+                <span className="rounded-full border-2 border-primary-fixed-dim bg-white/80 px-sm py-xxs font-label-sm text-label-sm text-primary">
+                  {syncStatusLabel(dashboard, actions.isSyncing)}
+                </span>
               </div>
               <div className="space-y-sm font-body-md text-on-surface-variant">
                 <p>
-                  <strong className="text-on-surface">Canvas:</strong>{" "}
-                  {dashboard.canvasConfigured ? "Connected or configured" : "Not connected"}
+                  <strong className="text-on-surface">Connection:</strong> {connectionLabel(dashboard)}
                 </p>
                 <p>
-                  <strong className="text-on-surface">Last sync:</strong>{" "}
-                  {dashboard.lastSyncAt ? new Date(dashboard.lastSyncAt).toLocaleString("en-AU") : "Never"}
+                  <strong className="text-on-surface">Last successful sync:</strong>{" "}
+                  {formatDate(dashboard.lastSuccessfulSyncAt || dashboard.lastSyncAt)}
                 </p>
                 <p>
-                  <strong className="text-on-surface">Data freshness:</strong>{" "}
-                  {dashboard.stale ? "Needs refresh" : "Fresh"}
+                  <strong className="text-on-surface">Last attempt:</strong> {formatDate(dashboard.lastSyncAttemptAt)}
                 </p>
+                <p>
+                  <strong className="text-on-surface">Data freshness:</strong> {freshnessLabel(dashboard, actions.isSyncing)}
+                </p>
+              </div>
+              {dashboard.syncError ? (
+                <div className="mt-sm rounded-lg border-2 border-error/30 bg-error-container/50 p-sm">
+                  <p className="font-label-md text-label-md text-error">Last error</p>
+                  <p className="font-body-sm text-on-error-container break-words">{dashboard.syncError}</p>
+                </div>
+              ) : null}
+              <div className="mt-md grid grid-cols-2 gap-sm">
+                {[
+                  ["Courses shown", syncSummary.visibleCourses],
+                  ["Courses hidden", syncSummary.hiddenCourses],
+                  ["Assignments", syncSummary.assignments],
+                  ["Unsubmitted", syncSummary.unsubmittedAssignments],
+                  ["Announcements", syncSummary.announcements],
+                  ["Canvas files", syncSummary.files],
+                  ["Module items", syncSummary.resources],
+                  ["Uploads", syncSummary.manualMaterials],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-white/80 border-2 border-primary-fixed-dim rounded-lg p-sm">
+                    <p className="font-display-sm text-display-sm text-primary">{value}</p>
+                    <p className="font-label-sm text-label-sm text-on-surface-variant">{label}</p>
+                  </div>
+                ))}
               </div>
               <button
                 type="button"
-                className="mt-md w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button"
+                className="mt-md w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
                 onClick={actions.onSyncCanvas}
+                disabled={actions.isSyncing}
               >
-                Sync now
+                {actions.isSyncing ? "Syncing..." : "Sync now"}
               </button>
             </div>
 
