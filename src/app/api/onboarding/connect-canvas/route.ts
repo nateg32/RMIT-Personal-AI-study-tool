@@ -61,3 +61,31 @@ export async function POST(request: Request) {
     return jsonError(error, 400);
   }
 }
+
+export async function DELETE() {
+  try {
+    const user = await requireUser();
+    const db = getDb();
+
+    await db.$transaction([
+      db.canvasConnection.deleteMany({ where: { userId: user.id } }),
+      db.course.deleteMany({ where: { userId: user.id } }),
+      db.syncSnapshot.deleteMany({
+        where: {
+          userId: user.id,
+          type: { in: ["assignment", "announcement", "file", "resource"] },
+        },
+      }),
+    ]);
+
+    await auditLog({
+      userId: user.id,
+      action: "canvas.disconnected",
+      metadata: { clearedSyncedCanvasData: true },
+    });
+
+    return jsonOk({ ok: true });
+  } catch (error) {
+    return jsonError(error, 400);
+  }
+}

@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { syncCanvasForUser } from "@/lib/canvas/sync";
 import { rateLimit } from "@/lib/rate-limit";
 
+export const maxDuration = 60;
+
 export async function POST() {
   let user: Awaited<ReturnType<typeof requireUser>> | null = null;
   try {

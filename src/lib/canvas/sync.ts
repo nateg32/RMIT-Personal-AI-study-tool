@@ -19,9 +19,10 @@ type ChangeEvent = {
   label: string;
 };
 
-const MAX_CANVAS_FILES_PER_COURSE = 80;
-const MAX_CANVAS_MODULES_PER_COURSE = 35;
-const MAX_CANVAS_MODULE_ITEMS_PER_COURSE = 220;
+const MAX_CANVAS_FILES_PER_COURSE = 35;
+const MAX_CANVAS_MODULES_PER_COURSE = 16;
+const MAX_CANVAS_MODULE_ITEMS_PER_COURSE = 90;
+const MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC = 8;
 
 function parseDate(value?: string | null) {
   return value ? new Date(value) : null;
@@ -154,11 +155,20 @@ export async function syncCanvasForUser(user: User) {
 
   try {
     const canvasUser = await client.getCurrentUser();
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        name: cleanPersonName(canvasUser.name) || cleanPersonName(user.name) || user.name,
+        email: canvasUser.primary_email?.toLowerCase() || user.email,
+      },
+    });
+
     const courses = await client.getCourses();
     const activeCourses = courses.filter((course) => course.workflow_state !== "deleted");
     const courseIdMap = new Map<number, string>();
     const visibleCanvasCourseIds = new Set<number>();
     const seenAnnouncements = new Set<string>();
+    let assignmentDetailFetches = 0;
 
     for (const course of activeCourses) {
       const savedCourse = await db.course.upsert({
@@ -233,9 +243,15 @@ export async function syncCanvasForUser(user: User) {
 
       for (const assignment of assignments) {
         if (!isCanvasAssignmentVisible(course.id, assignment.id, preferences)) continue;
-        const assignmentDetails = await client
-          .getAssignmentDetails(course.id, assignment.id)
-          .catch(() => assignment);
+        const shouldFetchAssignmentDetails =
+          assignmentDetailFetches < MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC &&
+          (!assignment.description || !assignment.rubric);
+        if (shouldFetchAssignmentDetails) assignmentDetailFetches += 1;
+        const assignmentDetails = shouldFetchAssignmentDetails
+          ? await client
+              .getAssignmentDetails(course.id, assignment.id)
+              .catch(() => assignment)
+          : assignment;
         const rubric = summariseRubric(
           assignmentDetails.rubric as Array<Record<string, unknown>> | null | undefined,
         );
@@ -330,6 +346,11 @@ export async function syncCanvasForUser(user: User) {
             },
           });
         }
+      }
+
+      const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch(() => []);
+      for (const announcement of courseAnnouncements) {
+        await saveAnnouncement(announcement, course.id);
       }
 
       const files = await client.getCourseFiles(course.id, MAX_CANVAS_FILES_PER_COURSE).catch(() => []);
@@ -434,22 +455,6 @@ export async function syncCanvasForUser(user: User) {
     for (const announcement of announcements) {
       await saveAnnouncement(announcement);
     }
-
-    for (const course of activeCourses) {
-      if (!visibleCanvasCourseIds.has(course.id)) continue;
-      const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch(() => []);
-      for (const announcement of courseAnnouncements) {
-        await saveAnnouncement(announcement, course.id);
-      }
-    }
-
-    await db.user.update({
-      where: { id: user.id },
-      data: {
-        name: cleanPersonName(canvasUser.name) || cleanPersonName(user.name) || user.name,
-        email: canvasUser.primary_email?.toLowerCase() || user.email,
-      },
-    });
 
     await db.canvasConnection.updateMany({
       where: { userId: user.id },

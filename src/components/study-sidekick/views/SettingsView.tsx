@@ -10,6 +10,8 @@ type SettingsViewProps = {
   scope: DashboardScopeSummary;
   actions: StudySidekickActions;
   onConnectCanvas: (canvasBaseUrl: string, accessToken: string) => Promise<void>;
+  onResetCanvasConnection: () => Promise<void>;
+  onUpdateProfileName: (name: string) => Promise<void>;
   onResetDashboardScope: () => Promise<void>;
   onLogout: () => void;
 };
@@ -57,15 +59,34 @@ export default function SettingsView({
   scope,
   actions,
   onConnectCanvas,
+  onResetCanvasConnection,
+  onUpdateProfileName,
   onResetDashboardScope,
   onLogout,
 }: SettingsViewProps) {
   const [search, setSearch] = useState("");
+  const [displayName, setDisplayName] = useState(dashboard.userName === "there" ? "" : dashboard.userName);
   const [canvasBaseUrl, setCanvasBaseUrl] = useState("https://rmit.instructure.com");
   const [accessToken, setAccessToken] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isResettingCanvas, setIsResettingCanvas] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const syncSummary = dashboard.syncSummary || emptySyncSummary;
+
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSavingProfile(true);
+    setMessage("Saving display name...");
+    try {
+      await onUpdateProfileName(displayName);
+      setMessage("Display name saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save display name.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -79,6 +100,24 @@ export default function SettingsView({
       setMessage(error instanceof Error ? error.message : "Could not connect Canvas.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const resetCanvas = async () => {
+    const confirmed = window.confirm(
+      "Restart Canvas connection? This clears the saved Canvas token and synced Canvas courses, assignments, files, modules, and announcements. Manual uploads and study sessions stay in the app.",
+    );
+    if (!confirmed) return;
+    setIsResettingCanvas(true);
+    setMessage("Restarting Canvas connection...");
+    try {
+      await onResetCanvasConnection();
+      setAccessToken("");
+      setMessage("Canvas connection reset. Paste a fresh token, connect, then run Sync now.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not reset Canvas connection.");
+    } finally {
+      setIsResettingCanvas(false);
     }
   };
 
@@ -100,56 +139,84 @@ export default function SettingsView({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
-          <section className="lg:col-span-7 sticky-note bg-surface-container-lowest border-2 border-primary-fixed-dim rounded-lg p-lg">
-            <div className="flex items-center gap-sm mb-md">
-              <span className="material-symbols-outlined text-primary">vpn_key</span>
-              <h2 className="font-headline-md text-headline-md text-primary">Canvas connection</h2>
-            </div>
-            <form className="space-y-md" onSubmit={submit}>
-              <label className="block">
-                <span className="font-label-md text-label-md text-on-surface-variant">Canvas base URL</span>
-                <input
-                  className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
-                  value={canvasBaseUrl}
-                  onChange={(event) => setCanvasBaseUrl(event.target.value)}
-                  placeholder="https://rmit.instructure.com"
-                  type="url"
-                  required
-                />
-              </label>
-              <label className="block">
-                <span className="font-label-md text-label-md text-on-surface-variant">Canvas access token</span>
-                <input
-                  className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
-                  value={accessToken}
-                  onChange={(event) => setAccessToken(event.target.value)}
-                  placeholder="Paste the token here. It will not be shown again."
-                  type="password"
-                  autoComplete="off"
-                  required
-                />
-              </label>
-              <div className="bg-primary-container/50 border-2 border-primary-fixed-dim rounded-lg p-md">
-                <p className="font-body-md text-on-primary-container">
-                  For v1, Canvas stays read-only. The app syncs courses, assignments, submissions, announcements,
-                  files, modules, and rubrics when available.
-                </p>
-                <p className="font-label-md text-label-md text-on-primary-container mt-sm">
-                  Connect validates and saves your token. Run Sync now separately so longer Canvas imports can report
-                  clear progress and errors.
-                </p>
+          <div className="lg:col-span-7 space-y-gutter">
+            <section className="sticky-note bg-surface-container-lowest border-2 border-primary-fixed-dim rounded-lg p-lg">
+              <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">badge</span>
+                <h2 className="font-headline-md text-headline-md text-primary">Profile</h2>
               </div>
-              <button
-                type="submit"
-                className="w-full bg-primary text-on-primary rounded-full py-sm font-bold bubbly-button disabled:opacity-60 flex items-center justify-center gap-sm"
-                disabled={isSaving}
-              >
-                <span className="material-symbols-outlined">{isSaving ? "sync" : "lock"}</span>
-                {isSaving ? "Connecting..." : "Connect Canvas"}
-              </button>
-              {message ? <p className="font-label-md text-label-md text-on-surface-variant">{message}</p> : null}
-            </form>
-          </section>
+              <form className="space-y-md" onSubmit={saveProfile}>
+                <label className="block">
+                  <span className="font-label-md text-label-md text-on-surface-variant">Display name</span>
+                  <input
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    placeholder="Nathaniel"
+                    required
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
+                  disabled={isSavingProfile || !displayName.trim()}
+                >
+                  {isSavingProfile ? "Saving..." : "Save display name"}
+                </button>
+              </form>
+            </section>
+
+            <section className="sticky-note bg-surface-container-lowest border-2 border-primary-fixed-dim rounded-lg p-lg">
+              <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">vpn_key</span>
+                <h2 className="font-headline-md text-headline-md text-primary">Canvas connection</h2>
+              </div>
+              <form className="space-y-md" onSubmit={submit}>
+                <label className="block">
+                  <span className="font-label-md text-label-md text-on-surface-variant">Canvas base URL</span>
+                  <input
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    value={canvasBaseUrl}
+                    onChange={(event) => setCanvasBaseUrl(event.target.value)}
+                    placeholder="https://rmit.instructure.com"
+                    type="url"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="font-label-md text-label-md text-on-surface-variant">Canvas access token</span>
+                  <input
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    value={accessToken}
+                    onChange={(event) => setAccessToken(event.target.value)}
+                    placeholder="Paste the token here. It will not be shown again."
+                    type="password"
+                    autoComplete="off"
+                    required
+                  />
+                </label>
+                <div className="bg-primary-container/50 border-2 border-primary-fixed-dim rounded-lg p-md">
+                  <p className="font-body-md text-on-primary-container">
+                    For v1, Canvas stays read-only. The app syncs courses, assignments, submissions, announcements,
+                    files, modules, and rubrics when available.
+                  </p>
+                  <p className="font-label-md text-label-md text-on-primary-container mt-sm">
+                    Connect validates and saves your token. Run Sync now separately so longer Canvas imports can report
+                    clear progress and errors.
+                  </p>
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-primary text-on-primary rounded-full py-sm font-bold bubbly-button disabled:opacity-60 flex items-center justify-center gap-sm"
+                  disabled={isSaving}
+                >
+                  <span className="material-symbols-outlined">{isSaving ? "sync" : "lock"}</span>
+                  {isSaving ? "Connecting..." : "Connect Canvas"}
+                </button>
+                {message ? <p className="font-label-md text-label-md text-on-surface-variant">{message}</p> : null}
+              </form>
+            </section>
+          </div>
 
           <aside className="lg:col-span-5 space-y-gutter">
             <div className="bg-primary-container/30 border-2 border-primary-fixed-dim rounded-lg p-md bubbly-shadow">
@@ -208,6 +275,20 @@ export default function SettingsView({
               >
                 {actions.isSyncing ? "Syncing..." : "Sync now"}
               </button>
+              <button
+                type="button"
+                className="mt-sm w-full bg-error-container/70 border-2 border-error/30 text-error rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
+                onClick={resetCanvas}
+                disabled={isResettingCanvas || actions.isSyncing}
+              >
+                {isResettingCanvas ? "Restarting..." : "Restart Canvas connection"}
+              </button>
+              {dashboard.canvasConnectionMode === "environment" ? (
+                <p className="mt-sm font-label-sm text-label-sm text-on-surface-variant">
+                  A Vercel Canvas token is still configured. Restart clears synced data, but that deployment token can
+                  still sync until it is removed or replaced in Vercel.
+                </p>
+              ) : null}
             </div>
 
             <div className="bg-tertiary-container border-2 border-tertiary-fixed rounded-lg p-md rotate-1">

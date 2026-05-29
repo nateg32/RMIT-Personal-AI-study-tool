@@ -325,8 +325,10 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         body: JSON.stringify(updates),
       });
       setStudySessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
-      await refreshData();
       setActionMessage("Study session updated.");
+      void refreshData().catch((error) => {
+        setActionMessage(error instanceof Error ? error.message : "Study session saved, but refresh failed.");
+      });
     },
     [refreshData],
   );
@@ -334,16 +336,52 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const updateAssignmentStatus = useCallback(
     async (assignmentId: string, status: "open" | "submitted_elsewhere") => {
       setActionMessage(status === "submitted_elsewhere" ? "Marking assignment done locally..." : "Reopening assignment locally...");
-      await apiJson<{ ok: boolean }>(`/api/assignments/${assignmentId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      await refreshData();
-      setActionMessage(
-        status === "submitted_elsewhere"
-          ? "Marked done locally. Canvas stays read-only, so this does not submit anything."
-          : "Assignment reopened locally. Your next Canvas sync can still update the real Canvas status.",
-      );
+      try {
+        await apiJson<{ ok: boolean }>(`/api/assignments/${assignmentId}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+        });
+        if (status === "submitted_elsewhere") {
+          const submittedAt = new Date().toISOString();
+          setAssignments((current) =>
+            current.map((assignment) =>
+              assignment.id === assignmentId
+                ? {
+                    ...assignment,
+                    submittedAt,
+                    workflowState: "submitted_elsewhere",
+                    dueStatus: "submitted",
+                    missing: false,
+                    late: false,
+                  }
+                : assignment,
+            ),
+          );
+          setDashboard((current) => ({
+            ...current,
+            dueToday: current.dueToday.filter((assignment) => assignment.id !== assignmentId),
+            dueThisWeek: current.dueThisWeek.filter((assignment) => assignment.id !== assignmentId),
+            unsubmitted: current.unsubmitted.filter((assignment) => assignment.id !== assignmentId),
+            priorityItems: current.priorityItems?.filter((assignment) => assignment.id !== assignmentId),
+            syncSummary: current.syncSummary
+              ? {
+                  ...current.syncSummary,
+                  unsubmittedAssignments: Math.max(current.syncSummary.unsubmittedAssignments - 1, 0),
+                }
+              : current.syncSummary,
+          }));
+        }
+        setActionMessage(
+          status === "submitted_elsewhere"
+            ? "Marked done locally. Canvas stays read-only, so this does not submit anything."
+            : "Assignment reopened locally. Your next Canvas sync can still update the real Canvas status.",
+        );
+        void refreshData().catch((error) => {
+          setActionMessage(error instanceof Error ? error.message : "Saved locally, but refresh failed.");
+        });
+      } catch (error) {
+        setActionMessage(error instanceof Error ? error.message : "Could not update assignment status.");
+      }
     },
     [refreshData],
   );
@@ -384,6 +422,32 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       });
       await refreshData();
       setActionMessage("Canvas connected. Run Sync now when you are ready to import courses, assignments, files, and announcements.");
+    },
+    [refreshData],
+  );
+
+  const resetCanvasConnection = useCallback(async () => {
+    setActionMessage("Clearing the saved Canvas connection and synced Canvas data...");
+    await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", { method: "DELETE" });
+    await refreshData();
+    setAssignments([]);
+    setCourses([]);
+    setAnnouncements([]);
+    setSelectedAssignmentId(null);
+    setActionMessage(
+      "Canvas connection reset. Paste a fresh Canvas token in Settings, then run Sync now. Manual uploads and study sessions stay in the app.",
+    );
+  }, [refreshData]);
+
+  const updateProfileName = useCallback(
+    async (name: string) => {
+      setActionMessage("Saving your display name...");
+      await apiJson<{ name: string }>("/api/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      await refreshData();
+      setActionMessage("Display name saved.");
     },
     [refreshData],
   );
@@ -625,6 +689,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 scope={dashboardScope}
                 actions={actions}
                 onConnectCanvas={connectCanvas}
+                onResetCanvasConnection={resetCanvasConnection}
+                onUpdateProfileName={updateProfileName}
                 onResetDashboardScope={() => updateDashboardScope({ action: "reset" })}
                 onLogout={logOut}
               />

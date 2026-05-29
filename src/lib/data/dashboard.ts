@@ -98,6 +98,10 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     }),
   ]);
   const lastSuccessfulSyncAt = latestDate(connection?.lastSyncAt, latestSuccessfulSync?.createdAt);
+  const activeSyncCutoff = new Date(now.getTime() - 15 * 60_000);
+  const syncStillActive = connection?.syncStatus === "syncing" && connection.updatedAt > activeSyncCutoff;
+  const abandonedSyncAt =
+    connection?.syncStatus === "syncing" && !syncStillActive ? connection.updatedAt : null;
   const connectionAttemptAt =
     connection?.syncStatus === "syncing" || connection?.syncStatus === "error" ? connection.updatedAt : null;
   const lastSyncAttemptAt = latestDate(lastSuccessfulSyncAt, latestFailedSync?.createdAt, connectionAttemptAt);
@@ -112,16 +116,18 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const syncStatus =
     !canvasConfigured
       ? "not_connected"
-      : connection?.syncStatus === "syncing"
+      : syncStillActive
         ? "syncing"
-        : connection?.syncStatus === "error" || failureIsLatest
+        : connection?.syncStatus === "error" || failureIsLatest || abandonedSyncAt
           ? "error"
           : lastSuccessfulSyncAt
             ? "success"
             : "never_synced";
   const syncError =
     syncStatus === "error"
-      ? connection?.syncError || metadataErrorMessage(latestFailedSync?.metadata) || "The latest Canvas sync failed."
+      ? abandonedSyncAt
+        ? "The previous Canvas sync did not finish. It likely timed out while importing course resources. Try Sync now again after reconnecting or narrowing dashboard scope."
+        : connection?.syncError || metadataErrorMessage(latestFailedSync?.metadata) || "The latest Canvas sync failed."
       : null;
 
   const courses = await db.course.findMany({
