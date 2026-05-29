@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma, type User } from "@prisma/client";
-import { CanvasClient } from "@/lib/canvas/client";
+import { CanvasClient, type CanvasAnnouncement, type CanvasSubmission } from "@/lib/canvas/client";
 import { getDb } from "@/lib/db";
 import { env, requireEnv } from "@/lib/env";
 import { decryptSecret } from "@/lib/security/crypto";
@@ -19,6 +19,39 @@ function parseDate(value?: string | null) {
 
 function stableHash(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function canvasSubmissionIsSubmitted(submission?: CanvasSubmission | null) {
+  const state = submission?.workflow_state?.toLowerCase();
+  return Boolean(
+    submission?.submitted_at ||
+      state === "submitted" ||
+      state === "graded" ||
+      state === "complete" ||
+      state === "pending_review",
+  );
+}
+
+function announcementPostedAt(announcement: CanvasAnnouncement) {
+  return (
+    announcement.posted_at ||
+    announcement.delayed_post_at ||
+    announcement.created_at ||
+    announcement.updated_at ||
+    null
+  );
+}
+
+function announcementCourseId(announcement: CanvasAnnouncement, fallbackCourseId?: number) {
+  if (announcement.context_code?.startsWith("course_")) {
+    const parsed = Number(announcement.context_code.replace("course_", ""));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  const url = announcement.html_url || announcement.url || "";
+  const match = url.match(/\/courses\/(\d+)(?:\/|$)/);
+  if (match?.[1]) return Number(match[1]);
+  return fallbackCourseId;
 }
 
 function summariseRubric(rubric: Array<Record<string, unknown>> | null | undefined) {
@@ -100,8 +133,8 @@ export async function syncCanvasForUser(user: User) {
   const client = await getCanvasClientForUser(user);
   const changes: ChangeEvent[] = [];
   const now = new Date();
-  const startDate = new Date(now.getTime() - 14 * 24 * 36e5);
-  const endDate = new Date(now.getTime() + 30 * 24 * 36e5);
+  const startDate = new Date(now.getTime() - 365 * 24 * 36e5);
+  const endDate = new Date(now.getTime() + 90 * 24 * 36e5);
 
   await db.canvasConnection.updateMany({
     where: { userId: user.id },
@@ -113,6 +146,7 @@ export async function syncCanvasForUser(user: User) {
     const courses = await client.getCourses();
     const activeCourses = courses.filter((course) => course.workflow_state !== "deleted");
     const courseIdMap = new Map<number, string>();
+    const seenAnnouncements = new Set<string>();
 
     for (const course of activeCourses) {
       const savedCourse = await db.course.upsert({
@@ -134,6 +168,47 @@ export async function syncCanvasForUser(user: User) {
       });
       courseIdMap.set(course.id, savedCourse.id);
     }
+
+    const saveAnnouncement = async (announcement: CanvasAnnouncement, fallbackCourseId?: number) => {
+      const canvasCourseId = announcementCourseId(announcement, fallbackCourseId);
+      const courseId = canvasCourseId ? courseIdMap.get(canvasCourseId) : undefined;
+      if (!courseId || !canvasCourseId) return;
+
+      const dedupeKey = `${canvasCourseId}:${announcement.id}`;
+      if (seenAnnouncements.has(dedupeKey)) return;
+      seenAnnouncements.add(dedupeKey);
+
+      const postedAt = announcementPostedAt(announcement);
+      const title = stripCanvasHtml(announcement.title) || `Announcement ${announcement.id}`;
+      const message = stripCanvasHtml(announcement.message);
+      const change = await snapshot(
+        user.id,
+        "announcement",
+        dedupeKey,
+        { title, message, posted_at: postedAt },
+        title,
+      );
+      if (change) changes.push(change);
+
+      await db.announcement.upsert({
+        where: { courseId_canvasAnnouncementId: { courseId, canvasAnnouncementId: announcement.id } },
+        create: {
+          userId: user.id,
+          courseId,
+          canvasAnnouncementId: announcement.id,
+          title,
+          message,
+          postedAt: parseDate(postedAt),
+          htmlUrl: announcement.html_url || announcement.url,
+        },
+        update: {
+          title,
+          message,
+          postedAt: parseDate(postedAt),
+          htmlUrl: announcement.html_url || announcement.url,
+        },
+      });
+    };
 
     for (const course of activeCourses) {
       const courseId = courseIdMap.get(course.id);
@@ -206,6 +281,15 @@ export async function syncCanvasForUser(user: User) {
         });
 
         if (assignmentDetails.submission) {
+          const existingSubmission = await db.submission.findUnique({
+            where: { assignmentId: savedAssignment.id },
+          });
+          const preserveManualStatus =
+            existingSubmission?.workflowState === "submitted_elsewhere" &&
+            !canvasSubmissionIsSubmitted(assignmentDetails.submission);
+
+          if (preserveManualStatus) continue;
+
           await db.submission.upsert({
             where: { assignmentId: savedAssignment.id },
             create: {
@@ -232,7 +316,7 @@ export async function syncCanvasForUser(user: User) {
       }
 
       const files = await client.getCourseFiles(course.id).catch(() => []);
-      for (const file of files.slice(0, 100)) {
+      for (const file of files) {
         const name = file.display_name || file.filename || `File ${file.id}`;
         const change = await snapshot(
           user.id,
@@ -324,43 +408,17 @@ export async function syncCanvasForUser(user: User) {
       activeCourses.map((course) => course.id),
       startDate,
       endDate,
-    );
+    ).catch(() => []);
 
     for (const announcement of announcements) {
-      const contextCourse = activeCourses.find((course) =>
-        (announcement.html_url || announcement.url || "").includes(`/courses/${course.id}/`),
-      );
-      const canvasCourseId = contextCourse?.id || activeCourses[0]?.id;
-      const courseId = canvasCourseId ? courseIdMap.get(canvasCourseId) : undefined;
-      if (!courseId) continue;
+      await saveAnnouncement(announcement);
+    }
 
-      const change = await snapshot(
-        user.id,
-        "announcement",
-        `${canvasCourseId}:${announcement.id}`,
-        { title: announcement.title, posted_at: announcement.posted_at },
-        announcement.title,
-      );
-      if (change) changes.push(change);
-
-      await db.announcement.upsert({
-        where: { courseId_canvasAnnouncementId: { courseId, canvasAnnouncementId: announcement.id } },
-        create: {
-          userId: user.id,
-          courseId,
-          canvasAnnouncementId: announcement.id,
-          title: announcement.title,
-          message: stripCanvasHtml(announcement.message),
-          postedAt: parseDate(announcement.posted_at),
-          htmlUrl: announcement.html_url || announcement.url,
-        },
-        update: {
-          title: announcement.title,
-          message: stripCanvasHtml(announcement.message),
-          postedAt: parseDate(announcement.posted_at),
-          htmlUrl: announcement.html_url || announcement.url,
-        },
-      });
+    for (const course of activeCourses) {
+      const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch(() => []);
+      for (const announcement of courseAnnouncements) {
+        await saveAnnouncement(announcement, course.id);
+      }
     }
 
     await db.user.update({

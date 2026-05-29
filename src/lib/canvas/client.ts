@@ -74,6 +74,10 @@ export type CanvasAnnouncement = {
   title: string;
   message?: string | null;
   posted_at?: string | null;
+  delayed_post_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  context_code?: string | null;
   html_url?: string | null;
   url?: string | null;
 };
@@ -161,6 +165,12 @@ export class CanvasClient {
     });
     for (const courseId of courseIds) params.append("context_codes[]", `course_${courseId}`);
     return this.getAllPages<CanvasAnnouncement>(`/api/v1/announcements?${params}`);
+  }
+
+  async getCourseAnnouncements(courseId: number) {
+    return this.getAllPages<CanvasAnnouncement>(
+      `/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&order_by=recent_activity&per_page=100`,
+    );
   }
 
   async getCourseFiles(courseId: number) {

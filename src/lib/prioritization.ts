@@ -16,7 +16,10 @@ export function isSubmitted(assignment: CanvasAssignmentSummary) {
       state === "submitted" ||
       state === "graded" ||
       state === "complete" ||
-      state === "pending_review",
+      state === "pending_review" ||
+      state === "submitted_elsewhere" ||
+      state === "manual_complete" ||
+      state === "done",
   );
 }
 

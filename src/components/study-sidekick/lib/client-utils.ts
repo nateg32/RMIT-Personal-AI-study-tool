@@ -39,7 +39,16 @@ export function formatRelative(value: string | null | undefined) {
 
 export function isSubmitted(assignment: AssignmentSummary) {
   const state = assignment.workflowState?.toLowerCase();
-  return Boolean(assignment.submittedAt) || state === "submitted" || state === "graded" || state === "complete" || state === "pending_review";
+  return (
+    Boolean(assignment.submittedAt) ||
+    state === "submitted" ||
+    state === "graded" ||
+    state === "complete" ||
+    state === "pending_review" ||
+    state === "submitted_elsewhere" ||
+    state === "manual_complete" ||
+    state === "done"
+  );
 }
 
 export function riskForAssignment(assignment: AssignmentSummary): RiskLevel {
@@ -65,6 +74,7 @@ export function estimateEffort(assignment: AssignmentSummary) {
 }
 
 export function statusLabel(assignment: AssignmentSummary) {
+  if (assignment.workflowState?.toLowerCase() === "submitted_elsewhere") return "Done elsewhere";
   if (isSubmitted(assignment)) return "Submitted";
   if (assignment.late) return "Late";
   if (assignment.missing) return "Missing";

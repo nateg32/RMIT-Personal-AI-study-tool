@@ -7,9 +7,10 @@ import type {
   CreateStudySessionInput,
   StudyPlan,
   StudySessionRecord,
+  StudySessionUpdateInput,
   StudySidekickActions,
 } from "../types";
-import { compactText, estimateEffort, formatDate, riskForAssignment } from "../lib/client-utils";
+import { compactText, estimateEffort, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
 
 type StudySessionsViewProps = {
   assignments: AssignmentSummary[];
@@ -18,6 +19,8 @@ type StudySessionsViewProps = {
   onSelectAssignment: (assignmentId: string | null) => void;
   onCreateSession: (input: CreateStudySessionInput) => void;
   onUpdateSession: (sessionId: string, generatedPlanJson: StudyPlan, status?: string) => Promise<void>;
+  onUpdateSessionMeta: (sessionId: string, updates: StudySessionUpdateInput) => Promise<void>;
+  onUpdateAssignmentStatus: (assignmentId: string, status: "open" | "submitted_elsewhere") => Promise<void>;
   isCreatingSession: boolean;
   actions: StudySidekickActions;
 };
@@ -71,22 +74,36 @@ export default function StudySessionsView({
   onSelectAssignment,
   onCreateSession,
   onUpdateSession,
+  onUpdateSessionMeta,
+  onUpdateAssignmentStatus,
   isCreatingSession,
   actions,
 }: StudySessionsViewProps) {
   const [search, setSearch] = useState("");
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [duration, setDuration] = useState(50);
   const [energyLevel, setEnergyLevel] = useState("Medium");
   const [mode, setMode] = useState("Plan assignment");
   const [targetOutcome, setTargetOutcome] = useState("Credit");
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: 50 * 60, running: false });
 
-  const selectedAssignment = assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignments[0] || null;
+  const selectedSession = selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) || null : null;
+  const assignmentFromSession = selectedSession?.assignmentId
+    ? assignments.find((assignment) => assignment.id === selectedSession.assignmentId) || null
+    : null;
+  const selectedAssignment =
+    assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignmentFromSession || assignments[0] || null;
   const activeSession =
-    sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) || sessions[0] || null;
+    selectedSession ||
+    sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) ||
+    null;
   const plan = activeSession?.generatedPlanJson || fallbackPlan(selectedAssignment, duration);
-  const totalSeconds = Math.max(60, (plan.blocks[0]?.minutes || duration) * 60);
-  const timerKey = `${activeSession?.id || selectedAssignment?.id || "draft"}:${totalSeconds}`;
+  const safeActiveBlockIndex = Math.min(activeBlockIndex, Math.max(0, plan.blocks.length - 1));
+  const activeBlock = plan.blocks[safeActiveBlockIndex] || plan.blocks[0];
+  const totalSeconds = Math.max(60, (activeBlock?.minutes || duration) * 60);
+  const timerKey = `${activeSession?.id || selectedAssignment?.id || "draft"}:${safeActiveBlockIndex}:${totalSeconds}`;
   const timer = useMemo(
     () => (timerState.key === timerKey ? timerState : { key: timerKey, secondsLeft: totalSeconds, running: false }),
     [timerKey, timerState, totalSeconds],
@@ -134,6 +151,47 @@ export default function StudySessionsView({
     });
   };
 
+  const saveSessionDetails = async () => {
+    if (!activeSession) return;
+    await onUpdateSessionMeta(activeSession.id, {
+      assignmentId: selectedAssignment?.id || null,
+      title: (sessionTitle ?? activeSession.title).trim() || plan.title,
+      durationMinutes: duration,
+      mode,
+      energyLevel,
+      targetOutcome,
+    });
+  };
+
+  const selectSession = (sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId) || null;
+    setSelectedSessionId(session?.id || null);
+    if (!session) {
+      setSessionTitle(null);
+      setActiveBlockIndex(0);
+      return;
+    }
+    setDuration(session.durationMinutes || 50);
+    setEnergyLevel(session.energyLevel || "Medium");
+    setMode(session.mode || "Plan assignment");
+    setTargetOutcome(session.targetOutcome || "Credit");
+    setSessionTitle(session.title);
+    setActiveBlockIndex(session.generatedPlanJson.activeBlockIndex || 0);
+    if (session.assignmentId) onSelectAssignment(session.assignmentId);
+  };
+
+  const selectBlock = async (index: number) => {
+    const nextSeconds = Math.max(60, (plan.blocks[index]?.minutes || duration) * 60);
+    setActiveBlockIndex(index);
+    setTimerState({
+      key: `${activeSession?.id || selectedAssignment?.id || "draft"}:${index}:${nextSeconds}`,
+      secondsLeft: nextSeconds,
+      running: false,
+    });
+    if (!activeSession) return;
+    await onUpdateSession(activeSession.id, { ...plan, activeBlockIndex: index }, "in_progress");
+  };
+
   const toggleChecklist = async (item: string) => {
     if (!activeSession) return;
     const nextPlan: StudyPlan = {
@@ -178,12 +236,58 @@ export default function StudySessionsView({
           <div className="col-span-12 lg:col-span-5 space-y-gutter">
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">fact_check</span>
+                <h3 className="font-headline-md text-headline-md">Saved sessions</h3>
+              </div>
+              <select
+                value={activeSession?.id || ""}
+                onChange={(event) => selectSession(event.target.value)}
+                className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+              >
+                <option value="">Draft from selected assignment</option>
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.assignment?.course?.courseCode || session.assignment?.course?.name || "Session"}: {session.title}
+                  </option>
+                ))}
+              </select>
+              {activeSession ? (
+                <div className="mt-md space-y-sm">
+                  <input
+                    value={sessionTitle ?? activeSession.title}
+                    onChange={(event) => setSessionTitle(event.target.value)}
+                    className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    placeholder="Session title"
+                  />
+                  <button
+                    type="button"
+                    className="bubbly-button w-full bg-secondary text-on-secondary font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
+                    onClick={saveSessionDetails}
+                  >
+                    <span className="material-symbols-outlined">save</span>
+                    Save session edits
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
+                  Generate a session, then you can come back and edit it here.
+                </p>
+              )}
+            </div>
+
+            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+              <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">assignment</span>
                 <h3 className="font-headline-md text-headline-md">Assignment</h3>
               </div>
               <select
                 value={selectedAssignment?.id || ""}
-                onChange={(event) => onSelectAssignment(event.target.value || null)}
+                onChange={(event) => {
+                  setSelectedSessionId(null);
+                  setSessionTitle(null);
+                  setActiveBlockIndex(0);
+                  onSelectAssignment(event.target.value || null);
+                }}
                 className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
               >
                 {filteredAssignments.length ? (
@@ -199,6 +303,25 @@ export default function StudySessionsView({
               <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
                 {selectedAssignment ? `${formatDate(selectedAssignment.dueAt)} - ${selectedAssignment.courseName}` : "Sync Canvas first."}
               </p>
+              {selectedAssignment ? (
+                <button
+                  type="button"
+                  className="mt-md bubbly-button w-full bg-surface-container border-2 border-surface-variant text-on-surface font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
+                  onClick={() =>
+                    onUpdateAssignmentStatus(
+                      selectedAssignment.id,
+                      isSubmitted(selectedAssignment) ? "open" : "submitted_elsewhere",
+                    )
+                  }
+                >
+                  <span className="material-symbols-outlined">
+                    {isSubmitted(selectedAssignment) ? "undo" : "task_alt"}
+                  </span>
+                  {isSubmitted(selectedAssignment)
+                    ? `Reopen locally (${statusLabel(selectedAssignment)})`
+                    : "Mark done elsewhere"}
+                </button>
+              ) : null}
             </div>
 
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">
@@ -326,10 +449,31 @@ export default function StudySessionsView({
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-5xl font-display-lg text-primary">{minutesToClock(secondsLeft)}</span>
                   <span className="text-sm font-bold text-on-surface-variant uppercase tracking-widest">
-                    {running ? "Focus Time" : "Ready"}
+                    {activeBlock?.name || (running ? "Focus Time" : "Ready")}
                   </span>
                 </div>
               </div>
+
+              {activeBlock ? (
+                <div className="w-full bg-white rounded-lg border-2 border-surface-variant p-md mb-md">
+                  <p className="font-label-sm text-label-sm uppercase text-on-surface-variant mb-xs">Current block</p>
+                  <h3 className="font-headline-md text-headline-md text-primary">{activeBlock.name}</h3>
+                  {activeBlock.goal ? <p className="font-body-md text-on-surface-variant mt-xs">{activeBlock.goal}</p> : null}
+                  <ul className="mt-sm space-y-xs">
+                    {activeBlock.tasks.map((task) => (
+                      <li key={task} className="flex gap-xs font-body-md text-body-md">
+                        <span className="material-symbols-outlined text-primary text-[18px]">arrow_right</span>
+                        <span>{task}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {activeBlock.breakMinutes ? (
+                    <p className="mt-sm font-label-md text-label-md text-secondary">
+                      Break after this: {activeBlock.breakMinutes} minutes
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="w-full bg-white rounded-lg border-2 border-surface-variant p-md mb-md">
                 <div className="flex items-center justify-between mb-sm gap-sm">
@@ -343,14 +487,16 @@ export default function StudySessionsView({
                 </p>
                 <div className="space-y-sm">
                   {plan.blocks.slice(0, 5).map((block, index) => (
-                    <div
+                    <button
                       key={`${block.name}-${index}`}
-                      className={`flex items-start gap-md p-sm rounded-lg border ${
-                        index === 0 ? "bg-primary-container border-primary/20" : "bg-white border-surface-variant"
+                      type="button"
+                      className={`w-full flex items-start gap-md p-sm rounded-lg border text-left ${
+                        index === safeActiveBlockIndex ? "bg-primary-container border-primary/20" : "bg-white border-surface-variant"
                       }`}
+                      onClick={() => selectBlock(index)}
                     >
                       <span className="font-bold text-primary w-12">{block.minutes}m</span>
-                      <span className="material-symbols-outlined text-primary">{index === 0 ? "menu_book" : "edit"}</span>
+                      <span className="material-symbols-outlined text-primary">{index === safeActiveBlockIndex ? "menu_book" : "edit"}</span>
                       <div className="flex-1">
                         <p className="font-medium">{block.name}</p>
                         <p className="text-sm text-on-surface-variant">{block.tasks[0] || block.goal || "Focus task"}</p>
@@ -358,7 +504,7 @@ export default function StudySessionsView({
                           <p className="text-xs text-secondary mt-xs">Break: {block.breakMinutes}m after this block</p>
                         ) : null}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>

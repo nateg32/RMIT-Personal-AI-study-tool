@@ -13,6 +13,8 @@ describe("prioritization", () => {
   it("marks submitted work as low risk", () => {
     expect(isSubmitted({ ...base, submittedAt: new Date().toISOString() })).toBe(true);
     expect(getUrgency({ ...base, workflowState: "submitted" }).label).toBe("low");
+    expect(isSubmitted({ ...base, workflowState: "submitted_elsewhere" })).toBe(true);
+    expect(getUrgency({ ...base, workflowState: "submitted_elsewhere" }).label).toBe("low");
   });
 
   it("marks unsubmitted work due within 24 hours as critical", () => {

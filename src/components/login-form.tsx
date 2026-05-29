@@ -35,7 +35,8 @@ export function LoginForm() {
 
   return (
     <form
-      className="space-y-4"
+      className="flex flex-col gap-md"
+      style={{ width: "100%" }}
       onSubmit={(event) => {
         event.preventDefault();
         setMessage("");
@@ -66,27 +67,37 @@ export function LoginForm() {
         });
       }}
     >
-      <Input
-        name="email"
-        type="email"
-        placeholder="s4169571@student.rmit.edu.au"
-        required
-        value={email}
-        onChange={(event) => setEmail(event.target.value)}
-      />
-      {codeSent ? (
+      <label className="flex flex-col gap-xs font-label-md text-label-md text-on-surface">
+        RMIT email
         <Input
-          name="code"
-          inputMode="numeric"
-          maxLength={10}
-          pattern="\d{6,10}"
-          placeholder="Code from email"
+          autoComplete="email"
+          className="h-12 rounded-lg px-md text-body-md"
+          name="email"
+          type="email"
+          placeholder="s4169571@student.rmit.edu.au"
           required
-          value={code}
-          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
         />
+      </label>
+      {codeSent ? (
+        <label className="flex flex-col gap-xs font-label-md text-label-md text-on-surface">
+          Sign-in code
+          <Input
+            autoComplete="one-time-code"
+            className="h-12 rounded-lg px-md text-body-md tracking-[0.24em]"
+            name="code"
+            inputMode="numeric"
+            maxLength={10}
+            pattern="\d{6,10}"
+            placeholder="Code from email"
+            required
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
+          />
+        </label>
       ) : null}
-      <Button className="w-full" disabled={pending} type="submit">
+      <Button className="w-full h-12 rounded-lg text-body-md text-white" disabled={pending} type="submit">
         {codeSent ? "Verify code" : "Send sign-in code"}
       </Button>
       {codeSent ? (
@@ -103,7 +114,7 @@ export function LoginForm() {
           Use a different email
         </button>
       ) : null}
-      {message ? <p className="text-sm text-muted">{message}</p> : null}
+      {message ? <p className="font-body-md text-body-md text-on-surface-variant">{message}</p> : null}
     </form>
   );
 }

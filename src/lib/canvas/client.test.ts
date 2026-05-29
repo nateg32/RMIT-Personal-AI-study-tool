@@ -73,6 +73,7 @@ describe("CanvasClient", () => {
 
     await client.getAssignmentsWithSubmissions(123);
     await client.getCourseModulesWithItems(123);
+    await client.getCourseAnnouncements(123);
 
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
@@ -87,6 +88,11 @@ describe("CanvasClient", () => {
     expect(fetcher).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("include[]=items"),
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining("only_announcements=true"),
       expect.objectContaining({ headers: expect.any(Object) }),
     );
   });

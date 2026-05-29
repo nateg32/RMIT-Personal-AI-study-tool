@@ -130,6 +130,17 @@ export type StudySessionRecord = {
   } | null;
 };
 
+export type StudySessionUpdateInput = {
+  assignmentId?: string | null;
+  title?: string;
+  durationMinutes?: number;
+  mode?: string;
+  targetOutcome?: string;
+  energyLevel?: string;
+  status?: string;
+  generatedPlanJson?: StudyPlan;
+};
+
 export type DailyBrief = {
   id?: string;
   summary: string;

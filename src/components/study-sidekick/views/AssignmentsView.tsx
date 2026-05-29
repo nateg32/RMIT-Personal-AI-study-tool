@@ -11,6 +11,7 @@ type AssignmentsViewProps = {
   actions: StudySidekickActions;
   onCreateSession: (assignmentId: string) => void;
   onSelectAssignment: (assignmentId: string) => void;
+  onUpdateAssignmentStatus: (assignmentId: string, status: "open" | "submitted_elsewhere") => Promise<void>;
   isCreatingSession: boolean;
 };
 
@@ -26,6 +27,7 @@ export default function AssignmentsView({
   actions,
   onCreateSession,
   onSelectAssignment,
+  onUpdateAssignmentStatus,
   isCreatingSession,
 }: AssignmentsViewProps) {
   const [search, setSearch] = useState("");
@@ -200,6 +202,21 @@ export default function AssignmentsView({
                     aria-label="Open study planner"
                   >
                     <span className="material-symbols-outlined">timer</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
+                    onClick={() =>
+                      onUpdateAssignmentStatus(
+                        assignment.id,
+                        isSubmitted(assignment) ? "open" : "submitted_elsewhere",
+                      )
+                    }
+                    aria-label={isSubmitted(assignment) ? "Reopen assignment locally" : "Mark done elsewhere"}
+                  >
+                    <span className="material-symbols-outlined">
+                      {isSubmitted(assignment) ? "undo" : "task_alt"}
+                    </span>
                   </button>
                   <button
                     type="button"

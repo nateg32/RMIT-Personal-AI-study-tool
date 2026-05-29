@@ -21,6 +21,7 @@ import type {
   FileSummary,
   StudyPlan,
   StudySessionRecord,
+  StudySessionUpdateInput,
   StudySidekickActions,
 } from "./types";
 
@@ -216,6 +217,37 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     [],
   );
 
+  const updateStudySessionMeta = useCallback(
+    async (sessionId: string, updates: StudySessionUpdateInput) => {
+      setActionMessage("Saving study session changes...");
+      const updated = await apiJson<StudySessionRecord>(`/api/study-sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+      });
+      setStudySessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
+      await refreshData();
+      setActionMessage("Study session updated.");
+    },
+    [refreshData],
+  );
+
+  const updateAssignmentStatus = useCallback(
+    async (assignmentId: string, status: "open" | "submitted_elsewhere") => {
+      setActionMessage(status === "submitted_elsewhere" ? "Marking assignment done locally..." : "Reopening assignment locally...");
+      await apiJson<{ ok: boolean }>(`/api/assignments/${assignmentId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      await refreshData();
+      setActionMessage(
+        status === "submitted_elsewhere"
+          ? "Marked done locally. Canvas stays read-only, so this does not submit anything."
+          : "Assignment reopened locally. Your next Canvas sync can still update the real Canvas status.",
+      );
+    },
+    [refreshData],
+  );
+
   const connectCanvas = useCallback(
     async (canvasBaseUrl: string, accessToken: string) => {
       setActionMessage("Validating and saving your Canvas token server-side...");
@@ -383,6 +415,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                   setSelectedAssignmentId(assignmentId);
                   setActiveView("sessions");
                 }}
+                onUpdateAssignmentStatus={updateAssignmentStatus}
                 isCreatingSession={isCreatingSession}
               />
             )}
@@ -408,6 +441,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 onSelectAssignment={setSelectedAssignmentId}
                 onCreateSession={createStudySession}
                 onUpdateSession={updateStudySession}
+                onUpdateSessionMeta={updateStudySessionMeta}
+                onUpdateAssignmentStatus={updateAssignmentStatus}
                 isCreatingSession={isCreatingSession}
                 actions={actions}
               />
