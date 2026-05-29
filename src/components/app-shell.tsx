@@ -27,7 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-background text-foreground">
       <AmbientBackground className="opacity-55 dark:opacity-45" />
-      <aside className="fixed inset-y-0 left-0 z-10 hidden w-72 border-r border-border bg-card/90 px-5 py-6 shadow-sm backdrop-blur lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-card/90 px-5 py-6 shadow-sm backdrop-blur lg:block">
         <Link href="/dashboard" className="block">
           <p className="text-sm font-medium text-muted">RMIT</p>
           <h1 className="text-xl font-semibold">Study Command Centre</h1>
@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
       </aside>
-      <div className="relative z-10 lg:pl-72">
+      <div className="relative z-10 lg:ml-72">
         <header className="sticky top-0 z-20 border-b border-border bg-background/90 px-4 py-3 backdrop-blur lg:hidden">
           <Link href="/dashboard" className="font-semibold">
             RMIT Study Command Centre
