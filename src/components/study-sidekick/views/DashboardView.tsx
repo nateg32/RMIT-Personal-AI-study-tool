@@ -326,7 +326,6 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
               {`"${briefJson?.motivationalLine || "Win the day by shrinking the problem."}"`}
             </p>
             <div className="mt-sm flex items-center justify-center gap-xs">
-              <span className="material-symbols-outlined text-tertiary text-sm">colors_spark</span>
               <p className="font-label-md text-tertiary uppercase tracking-widest">
                 {nextDeadline ? `${nextDeadline.courseName}: ${statusLabel(nextDeadline)}` : "Canvas ready"}
               </p>

@@ -496,7 +496,7 @@ export default function StudySessionsView({
 
         <div className="grid grid-cols-12 gap-gutter">
           <div className="col-span-12 lg:col-span-5 space-y-gutter">
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">route</span>
                 <h3 className="font-headline-md text-headline-md">Session source</h3>
@@ -531,7 +531,7 @@ export default function StudySessionsView({
               </p>
             </div>
 
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">fact_check</span>
                 <h3 className="font-headline-md text-headline-md">Saved sessions</h3>
@@ -573,7 +573,7 @@ export default function StudySessionsView({
             </div>
 
             {sessionMode === "canvas" ? (
-              <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+              <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">assignment</span>
                 <h3 className="font-headline-md text-headline-md">Assignment</h3>
@@ -622,7 +622,7 @@ export default function StudySessionsView({
               ) : null}
               </div>
             ) : (
-              <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+              <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
                 <div className="flex items-center gap-sm mb-md">
                   <span className="material-symbols-outlined text-primary">edit_note</span>
                   <h3 className="font-headline-md text-headline-md">Custom focus</h3>
@@ -651,7 +651,7 @@ export default function StudySessionsView({
               </div>
             )}
 
-            <div className="sticky-note bg-primary-container/25 p-md rounded-lg border-2 border-primary-fixed-dim rotate-1">
+            <div className="straight-panel bg-primary-container/25 p-md rounded-lg border-2 border-primary-fixed-dim">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">attach_file_add</span>
                 <h3 className="font-headline-md text-headline-md">Add context before planning</h3>
@@ -690,7 +690,7 @@ export default function StudySessionsView({
               </button>
             </div>
 
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">schedule</span>
                 <h3 className="font-headline-md text-headline-md">How long?</h3>
@@ -753,7 +753,7 @@ export default function StudySessionsView({
 
             {showSetupOptions ? (
             <>
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">battery_charging_80</span>
                 <h3 className="font-headline-md text-headline-md">Energy Level</h3>
@@ -777,7 +777,7 @@ export default function StudySessionsView({
               </div>
             </div>
 
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">psychology</span>
                 <h3 className="font-headline-md text-headline-md">Study Mode</h3>
@@ -801,7 +801,7 @@ export default function StudySessionsView({
               </div>
             </div>
 
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">workspace_premium</span>
                 <h3 className="font-headline-md text-headline-md">Target outcome</h3>

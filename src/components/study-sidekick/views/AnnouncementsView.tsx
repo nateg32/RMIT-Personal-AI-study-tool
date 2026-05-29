@@ -37,11 +37,6 @@ export default function AnnouncementsView({ announcements, courses, actions }: A
       />
 
       <section className="mb-xl text-left relative">
-        <div className="absolute -top-8 -left-8 opacity-20 pointer-events-none">
-          <span className="material-symbols-outlined text-primary text-[120px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-            colors_spark
-          </span>
-        </div>
         <h2 className="font-headline-lg text-headline-lg font-bold text-primary mb-xs relative z-10">Stay in the loop</h2>
         <p className="font-body-lg text-body-lg text-on-surface-variant relative z-10">
           Announcements are synced from Canvas so you can spot lecturer updates without opening every course.

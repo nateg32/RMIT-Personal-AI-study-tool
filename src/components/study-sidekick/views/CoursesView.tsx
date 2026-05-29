@@ -41,22 +41,19 @@ export default function CoursesView({
         actions={actions}
       />
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-lg gap-md mt-lg max-w-7xl mx-auto w-full">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] items-end mb-lg gap-md mt-lg max-w-7xl mx-auto w-full">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-sm mb-xs">
-            <span className="text-primary material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
-              colors_spark
-            </span>
+          <div className="mb-xs">
             <span className="font-label-md text-label-md text-primary uppercase tracking-widest font-bold">
               Current Enrolment
             </span>
           </div>
           <h2 className="font-display-lg text-display-lg text-on-surface">Your Curated Library</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant max-w-xl">
-            Synced from Canvas with assignments, files, announcements, and module resources grouped by course.
+          <p className="font-body-lg text-body-lg text-on-surface-variant max-w-3xl whitespace-normal">
+            Canvas courses grouped with assignments, files, announcements, and module resources.
           </p>
         </div>
-        <div className="flex gap-sm">
+        <div className="flex flex-wrap gap-sm lg:justify-end">
           <button
             type="button"
             className="flex items-center gap-sm bg-surface-container border-2 border-outline-variant px-lg py-md rounded-full font-label-md text-label-md hover:bg-surface-variant transition-all active:scale-95"
