@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { personalGreeting } from "@/lib/display";
 import ViewHeader from "../components/ViewHeader";
 import type { AssignmentSummary, CourseDashboardSummary, DailyBrief, DashboardSummary, StudySidekickActions } from "../types";
 import { assignmentTypeLabel, estimateEffort, formatRelative, riskTone, statusLabel } from "../lib/client-utils";
@@ -110,6 +111,10 @@ function SubjectCard({ course }: { course: CourseDashboardSummary }) {
 
 export default function DashboardView({ dashboard, dailyBrief, actions, onCreateSession }: DashboardViewProps) {
   const [search, setSearch] = useState("");
+  const greeting = useMemo(
+    () => personalGreeting(dashboard.userName, dashboard.timezone),
+    [dashboard.timezone, dashboard.userName],
+  );
   const missionAssignments = useMemo(() => {
     const query = search.trim().toLowerCase();
     const items = dashboard.priorityItems?.length
@@ -143,7 +148,7 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
       <div className="flex-grow flex flex-col w-full max-w-7xl mx-auto">
         <section className="flex flex-col md:flex-row justify-between items-start md:items-end gap-md mb-xl mt-md">
           <div>
-            <h1 className="font-display-lg text-display-lg text-primary">Good morning, {dashboard.userName}</h1>
+            <h1 className="font-display-lg text-display-lg text-primary">{greeting}</h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant">
               Your Canvas command centre is prioritised by due date, submission status, and risk.
             </p>

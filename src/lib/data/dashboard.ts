@@ -1,6 +1,7 @@
 import type { User } from "@prisma/client";
 import { addDays, endOfDay, startOfDay, subHours } from "date-fns";
 import { getDb } from "@/lib/db";
+import { firstDisplayName } from "@/lib/display";
 import { env } from "@/lib/env";
 import { demoDashboard } from "@/lib/mock-data";
 import { getOverallRisk, isSubmitted, sortByPriority, withPrioritySignals } from "@/lib/prioritization";
@@ -260,7 +261,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   });
 
   return {
-    userName: user.name.split(" ")[0] || user.name,
+    userName: firstDisplayName(user.name),
     timezone: user.timezone,
     lastSyncAt: lastSuccessfulSyncAt?.toISOString() || null,
     lastSuccessfulSyncAt: lastSuccessfulSyncAt?.toISOString() || null,

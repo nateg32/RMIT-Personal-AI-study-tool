@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma, type User } from "@prisma/client";
 import { CanvasClient, type CanvasAnnouncement, type CanvasSubmission } from "@/lib/canvas/client";
 import { getDb } from "@/lib/db";
+import { cleanPersonName } from "@/lib/display";
 import { env, requireEnv } from "@/lib/env";
 import { decryptSecret } from "@/lib/security/crypto";
 import { stripCanvasHtml } from "@/lib/security/html";
@@ -445,8 +446,8 @@ export async function syncCanvasForUser(user: User) {
     await db.user.update({
       where: { id: user.id },
       data: {
-        name: canvasUser.name || user.name,
-        email: canvasUser.primary_email || user.email,
+        name: cleanPersonName(canvasUser.name) || cleanPersonName(user.name) || user.name,
+        email: canvasUser.primary_email?.toLowerCase() || user.email,
       },
     });
 

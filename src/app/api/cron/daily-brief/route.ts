@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       const dashboard = await getDashboardData(user);
       const brief = await generateDailyBrief({
         name: dashboard.userName,
+        timezone: dashboard.timezone,
         dueToday: dashboard.dueToday,
         dueThisWeek: dashboard.dueThisWeek,
         priorityItems: dashboard.priorityItems,

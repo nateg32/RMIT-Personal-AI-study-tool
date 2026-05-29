@@ -7,6 +7,7 @@ import type {
   StudyPlan,
 } from "@/lib/types";
 import { env } from "@/lib/env";
+import { personalGreeting } from "@/lib/display";
 import { getAssignmentType, getUrgency, isSubmitted } from "@/lib/prioritization";
 import { formatDateTime } from "@/lib/utils";
 
@@ -212,6 +213,7 @@ Each block must include concrete tasks, a goal, resource names where useful, and
 
 export function fallbackDailyBrief(input: {
   name: string;
+  timezone?: string;
   dueToday: CanvasAssignmentSummary[];
   dueThisWeek: CanvasAssignmentSummary[];
   priorityItems?: CanvasAssignmentSummary[];
@@ -221,7 +223,7 @@ export function fallbackDailyBrief(input: {
   const urgent = (input.priorityItems?.length ? input.priorityItems : [...input.dueToday, ...input.dueThisWeek]).slice(0, 5);
   const topRisk = urgent[0] ? getUrgency(urgent[0]).label : "low";
   return {
-    greeting: `Good morning ${input.name}.`,
+    greeting: `${personalGreeting(input.name, input.timezone)}.`,
     summary:
       urgent.length > 0
         ? `Today is about reducing academic risk: start with ${urgent[0].courseName}: ${urgent[0].name}.`
@@ -246,6 +248,8 @@ Create a concise personalised study brief as JSON only.
 Never invent assignments, due dates, files, or announcements. Use only this data.
 
 Student: ${input.name}
+Student timezone: ${input.timezone || "Australia/Sydney"}
+Greeting to use for the current local time: ${personalGreeting(input.name, input.timezone)}.
 Due today: ${JSON.stringify(input.dueToday)}
 Due this week: ${JSON.stringify(input.dueThisWeek)}
 Priority order: ${JSON.stringify(input.priorityItems || [])}

@@ -2,6 +2,7 @@ import { cache } from "react";
 import type { User } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { cleanPersonName } from "@/lib/display";
 import { getAllowedEmails, isProductionRuntime, isSupabaseConfigured } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -21,6 +22,14 @@ const demoUser = {
   createdAt: new Date(),
   updatedAt: new Date(),
 } satisfies User;
+
+function metadataName(metadata: Record<string, unknown> | null | undefined) {
+  return (
+    cleanPersonName(metadata?.name) ||
+    cleanPersonName(metadata?.full_name) ||
+    cleanPersonName(metadata?.display_name)
+  );
+}
 
 export const getCurrentUser = cache(async (): Promise<User> => {
   const allowed = getAllowedEmails();
@@ -42,17 +51,18 @@ export const getCurrentUser = cache(async (): Promise<User> => {
   }
 
   const db = getDb();
+  const authName = metadataName(data.user.user_metadata);
   return db.user.upsert({
     where: { email },
     create: {
       email,
-      name: data.user.user_metadata?.name || email.split("@")[0] || "Student",
+      name: authName || "Student",
       supabaseUserId: data.user.id,
       timezone: "Australia/Sydney",
     },
     update: {
       supabaseUserId: data.user.id,
-      name: data.user.user_metadata?.name || undefined,
+      name: authName || undefined,
     },
   });
 });

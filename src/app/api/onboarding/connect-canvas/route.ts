@@ -3,6 +3,7 @@ import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { CanvasClient } from "@/lib/canvas/client";
 import { getDb } from "@/lib/db";
+import { cleanPersonName } from "@/lib/display";
 import { requireUser } from "@/lib/auth";
 import { encryptSecret } from "@/lib/security/crypto";
 import { normaliseBaseUrl } from "@/lib/utils";
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
     const input = await parseJson(request, connectSchema);
     const canvasBaseUrl = normaliseBaseUrl(input.canvasBaseUrl);
     const client = new CanvasClient({ baseUrl: canvasBaseUrl, token: input.accessToken });
-    await client.getCurrentUser();
+    const canvasUser = await client.getCurrentUser();
     const encrypted = encryptSecret(input.accessToken);
     const db = getDb();
 
@@ -42,6 +43,17 @@ export async function POST(request: Request) {
         syncError: null,
       },
     });
+
+    const canvasName = cleanPersonName(canvasUser.name);
+    if (canvasName) {
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          name: canvasName,
+          email: canvasUser.primary_email?.toLowerCase() || user.email,
+        },
+      });
+    }
 
     await auditLog({ userId: user.id, action: "canvas.connected", metadata: { canvasBaseUrl } });
     return jsonOk({ ok: true });
