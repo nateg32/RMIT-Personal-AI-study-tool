@@ -53,6 +53,15 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const todayEnd = endOfDay(now);
   const weekEnd = addDays(todayEnd, 7);
   const connection = await db.canvasConnection.findUnique({ where: { userId: user.id } });
+  const latestSync = connection?.lastSyncAt
+    ? null
+    : await db.auditLog.findFirst({
+        where: { userId: user.id, action: "canvas.synced" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+  const lastSyncAt = connection?.lastSyncAt || latestSync?.createdAt || null;
+  const canvasConfigured = Boolean(connection || (env.CANVAS_BASE_URL && env.CANVAS_ACCESS_TOKEN));
 
   const assignments = await db.assignment.findMany({
     where: {
@@ -93,13 +102,14 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     take: 8,
   });
 
-  const stale = !connection?.lastSyncAt || connection.lastSyncAt < subHours(now, 12);
+  const stale = !lastSyncAt || lastSyncAt < subHours(now, 12);
   const priority = unsubmitted.slice(0, 4);
 
   return {
     userName: user.name.split(" ")[0] || user.name,
     timezone: user.timezone,
-    lastSyncAt: connection?.lastSyncAt?.toISOString() || null,
+    lastSyncAt: lastSyncAt?.toISOString() || null,
+    canvasConfigured,
     stale,
     riskLevel: getOverallRisk(unsubmitted),
     todayMission:

@@ -9,7 +9,7 @@ import {
   Settings,
   TimerReset,
 } from "lucide-react";
-import { DottedSurface } from "@/components/ui/dotted-surface";
+import { AmbientBackground } from "@/components/ambient-background";
 import { cn } from "@/lib/utils";
 
 const nav = [
@@ -25,8 +25,8 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
-      <DottedSurface className="opacity-75 dark:opacity-60" />
+    <div className="relative isolate min-h-screen overflow-hidden bg-background text-foreground">
+      <AmbientBackground className="opacity-55 dark:opacity-45" />
       <aside className="fixed inset-y-0 left-0 z-10 hidden w-72 border-r border-border bg-card/90 px-5 py-6 shadow-sm backdrop-blur lg:block">
         <Link href="/dashboard" className="block">
           <p className="text-sm font-medium text-muted">RMIT</p>

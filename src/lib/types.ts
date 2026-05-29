@@ -94,6 +94,7 @@ export type DashboardSummary = {
   userName: string;
   timezone: string;
   lastSyncAt?: string | null;
+  canvasConfigured?: boolean;
   stale: boolean;
   todayMission: string[];
   dueToday: CanvasAssignmentSummary[];

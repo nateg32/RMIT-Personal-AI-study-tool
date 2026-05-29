@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Flame, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { AssignmentCard } from "@/components/assignment-card";
 import { DailyBriefButton } from "@/components/daily-brief-button";
@@ -42,6 +43,17 @@ export default async function DashboardPage() {
           <p>
             Canvas data is stale or not synced yet. Last sync:{" "}
             {dashboard.lastSyncAt ? formatDateTime(dashboard.lastSyncAt, dashboard.timezone) : "never"}.
+            {dashboard.canvasConfigured ? (
+              <> Use Sync now to refresh it.</>
+            ) : (
+              <>
+                {" "}
+                <Link className="font-medium text-primary underline-offset-4 hover:underline" href="/settings">
+                  Connect Canvas in Settings
+                </Link>
+                .
+              </>
+            )}
           </p>
         </div>
       ) : null}

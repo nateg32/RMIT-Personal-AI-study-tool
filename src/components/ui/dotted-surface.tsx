@@ -23,9 +23,9 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     if (!container) return;
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const separation = 132;
-    const amountX = 48;
-    const amountY = 58;
+    const separation = 190;
+    const amountX = 26;
+    const amountY = 32;
     const { width, height } = getCanvasSize();
 
     const scene = new THREE.Scene();
@@ -36,11 +36,13 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
       antialias: true,
-      preserveDrawingBuffer: true,
+      powerPreference: "low-power",
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0);
+    renderer.domElement.style.pointerEvents = "none";
+    renderer.domElement.setAttribute("aria-hidden", "true");
     container.appendChild(renderer.domElement);
 
     const geometry = new THREE.BufferGeometry();
@@ -89,6 +91,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
 
     let frameId = 0;
     let count = 0;
+    let pageVisible = !document.hidden;
 
     const renderFrame = () => {
       const positionAttribute = geometry.attributes.position;
@@ -109,8 +112,16 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
       count += 0.055;
     };
 
-    const animate = () => {
-      renderFrame();
+    let lastRender = 0;
+    const animate = (timestamp = 0) => {
+      if (!pageVisible) {
+        frameId = 0;
+        return;
+      }
+      if (timestamp - lastRender > 33) {
+        renderFrame();
+        lastRender = timestamp;
+      }
       frameId = window.requestAnimationFrame(animate);
     };
 
@@ -122,7 +133,18 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
       renderer.render(scene, camera);
     };
 
+    const handleVisibilityChange = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible && !reducedMotion && !frameId) {
+        frameId = window.requestAnimationFrame(animate);
+      } else if (!pageVisible && frameId) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+    };
+
     window.addEventListener("resize", handleResize);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     if (reducedMotion) {
       renderFrame();
     } else {
@@ -131,6 +153,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (frameId) window.cancelAnimationFrame(frameId);
       geometry.dispose();
       material.dispose();
@@ -143,7 +166,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     <div
       ref={containerRef}
       aria-hidden="true"
-      className={cn("pointer-events-none fixed inset-0 z-0 overflow-hidden", className)}
+      className={cn("pointer-events-none fixed inset-0 z-0 select-none overflow-hidden", className)}
       {...props}
     />
   );
