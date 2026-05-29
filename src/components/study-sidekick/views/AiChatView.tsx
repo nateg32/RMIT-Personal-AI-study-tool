@@ -8,6 +8,9 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: number;
+  provider?: "gemini" | "fallback";
+  model?: string | null;
 };
 
 type AiChatViewProps = {
@@ -16,6 +19,8 @@ type AiChatViewProps = {
   onDraftChange: (value: string) => void;
   onSend: (message: string) => void;
   actions: StudySidekickActions;
+  isSending?: boolean;
+  chatProviderStatus?: string | null;
 };
 
 const suggestions = [
@@ -39,10 +44,19 @@ const suggestions = [
   },
 ];
 
-export default function AiChatView({ messages, draft, onDraftChange, onSend, actions }: AiChatViewProps) {
+export default function AiChatView({
+  messages,
+  draft,
+  onDraftChange,
+  onSend,
+  actions,
+  isSending = false,
+  chatProviderStatus,
+}: AiChatViewProps) {
   const [search, setSearch] = useState("");
 
   const submit = () => {
+    if (isSending) return;
     onSend(draft);
   };
 
@@ -65,8 +79,9 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
               <button
                 key={suggestion.prompt}
                 type="button"
-                className={`text-left border-2 p-md rounded-lg bubbly-shadow bubbly-button transition-all hover-squish ${suggestion.className}`}
+                className={`text-left border-2 p-md rounded-lg bubbly-shadow bubbly-button transition-all hover-squish disabled:opacity-60 ${suggestion.className}`}
                 onClick={() => onSend(suggestion.prompt)}
+                disabled={isSending}
               >
                 <span className="font-label-sm text-label-sm mb-xs block opacity-80">{suggestion.tag}</span>
                 <p className="font-body-md text-body-md font-bold">{suggestion.prompt}</p>
@@ -91,6 +106,7 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
                   type="button"
                   className="p-sm rounded-lg hover:bg-primary-container/30 cursor-pointer transition-colors border border-transparent text-left flex items-center gap-sm"
                   onClick={() => onSend(label === "Assignment battle plan" ? "Create a battle plan for my most urgent assignment." : `Show me ${label.toLowerCase()}.`)}
+                  disabled={isSending}
                 >
                   <span className="material-symbols-outlined text-primary">{icon}</span>
                   <span className="font-label-md text-label-md text-on-surface-variant">{label}</span>
@@ -116,14 +132,16 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              className="p-sm rounded-full hover:bg-surface-container text-on-surface-variant transition-colors"
-              onClick={() => onSend("What am I ignoring that could hurt me later?")}
-              aria-label="Ask risk question"
-            >
-              <span className="material-symbols-outlined">more_vert</span>
-            </button>
+          </div>
+
+          <div className="px-md pt-md">
+            <div className="rounded-lg border-2 border-primary-fixed-dim bg-primary-container/25 px-md py-sm flex items-start gap-sm">
+              <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">schedule</span>
+              <p className="font-label-md text-label-md text-on-surface-variant">
+                Chats are kept in this browser for 24 hours, then auto-cleared. Sidekick can only answer from synced Canvas data and your uploaded study materials.
+                {chatProviderStatus ? <span className="block mt-xs text-primary">{chatProviderStatus}</span> : null}
+              </p>
+            </div>
           </div>
 
           <div className="flex-grow overflow-y-auto p-md space-y-lg custom-scrollbar">
@@ -145,6 +163,11 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
                   }`}
                 >
                   <p className="font-body-md text-body-md">{message.content}</p>
+                  {message.role === "assistant" && message.provider ? (
+                    <p className="mt-sm font-label-sm text-label-sm opacity-70">
+                      {message.provider === "gemini" ? `Gemini${message.model ? ` (${message.model})` : ""}` : "Deterministic fallback"}
+                    </p>
+                  ) : null}
                 </div>
                 {message.role === "user" ? (
                   <div className="w-10 h-10 rounded-full bg-[#FFEBE6] flex items-center justify-center flex-shrink-0 border-2 border-[#FFC7B8]">
@@ -162,6 +185,7 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
                 className="p-sm text-on-surface-variant hover:text-primary transition-colors"
                 onClick={() => onSend("Which files or lectures should I open for my most urgent assignment?")}
                 aria-label="Ask about files"
+                disabled={isSending}
               >
                 <span className="material-symbols-outlined">attach_file</span>
               </button>
@@ -171,6 +195,7 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
                 rows={1}
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
+                disabled={isSending}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -180,11 +205,12 @@ export default function AiChatView({ messages, draft, onDraftChange, onSend, act
               />
               <button
                 type="button"
-                className="bg-primary text-on-primary w-10 h-10 rounded-lg flex items-center justify-center bubbly-button"
+                className="bg-primary text-on-primary w-10 h-10 rounded-lg flex items-center justify-center bubbly-button disabled:opacity-60"
                 onClick={submit}
                 aria-label="Send message"
+                disabled={isSending || !draft.trim()}
               >
-                <span className="material-symbols-outlined">send</span>
+                <span className="material-symbols-outlined">{isSending ? "hourglass_top" : "send"}</span>
               </button>
             </div>
             <div className="mt-sm flex justify-center">

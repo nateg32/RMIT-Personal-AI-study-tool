@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ViewType } from "./lib/utils";
 import SideNav from "./components/SideNav";
 import DashboardView from "./views/DashboardView";
@@ -87,6 +87,42 @@ const emptyDashboard: DashboardSummary = {
   riskLevel: "low",
 };
 
+const CHAT_STORAGE_KEY = "study-sidekick-chat-v1";
+const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+function welcomeMessage(): ChatMessage {
+  return {
+    id: "welcome",
+    role: "assistant",
+    createdAt: Date.now(),
+    content:
+      "Hey Nathaniel. Ask me what is due, what changed, or which assignment needs a battle plan. I will stay grounded in Canvas and your uploaded study materials.",
+  };
+}
+
+function pruneChatMessages(messages: ChatMessage[]) {
+  const cutoff = Date.now() - CHAT_RETENTION_MS;
+  const fresh = messages.filter((message) => message.createdAt >= cutoff);
+  return fresh.length ? fresh : [welcomeMessage()];
+}
+
+function loadStoredChatMessages() {
+  if (typeof window === "undefined") return [welcomeMessage()];
+  try {
+    const stored = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!stored) return [welcomeMessage()];
+    const parsed = JSON.parse(stored) as ChatMessage[];
+    if (!Array.isArray(parsed)) return [welcomeMessage()];
+    return pruneChatMessages(
+      parsed
+        .filter((message) => message && (message.role === "assistant" || message.role === "user") && typeof message.content === "string")
+        .map((message) => ({ ...message, createdAt: message.createdAt || Date.now() })),
+    );
+  } catch {
+    return [welcomeMessage()];
+  }
+}
+
 export default function App({ initialView = "dashboard" }: { initialView?: ViewType }) {
   const [activeView, setActiveView] = useState<ViewType>(initialView);
   const [dashboard, setDashboard] = useState<DashboardSummary>(emptyDashboard);
@@ -101,16 +137,23 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [isSyncing, setIsSyncing] = useState(false);
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isChatSending, setIsChatSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [chatProviderStatus, setChatProviderStatus] = useState<string | null>(null);
   const [chatDraft, setChatDraft] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "Hi Nathaniel. Ask me about what is due, what changed, or which assignment needs a battle plan. I will answer from your synced Canvas data.",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadStoredChatMessages);
+  const chatSendingRef = useRef(false);
+
+  useEffect(() => {
+    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(pruneChatMessages(chatMessages)));
+  }, [chatMessages]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setChatMessages((current) => pruneChatMessages(current));
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const refreshData = useCallback(async () => {
     const [dashboardData, assignmentData, courseData, announcementData, fileData, sessionData, briefData] =
@@ -295,27 +338,54 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     async (message: string) => {
       const trimmed = message.trim();
       if (!trimmed) return;
-      const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: trimmed };
+      if (chatSendingRef.current) {
+        setActionMessage("Sidekick is already thinking. Wait for this answer before sending another one.");
+        return;
+      }
+      chatSendingRef.current = true;
+      setIsChatSending(true);
+      const now = Date.now();
+      const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: now };
       const pendingId = crypto.randomUUID();
       setChatMessages((current) => [
-        ...current,
+        ...pruneChatMessages(current),
         userMessage,
-        { id: pendingId, role: "assistant", content: "Checking your synced Canvas data..." },
+        {
+          id: pendingId,
+          role: "assistant",
+          createdAt: now,
+          content: "Give me a sec. I’m checking Canvas, uploaded materials, and the priority list.",
+        },
       ]);
       setChatDraft("");
       setActiveView("chat");
 
       try {
-        const payload = await apiJson<{ answer: string; lastSyncAt?: string | null }>("/api/chat", {
+        const payload = await apiJson<{
+          answer: string;
+          lastSyncAt?: string | null;
+          provider?: "gemini" | "fallback";
+          model?: string | null;
+          reason?: string | null;
+        }>("/api/chat", {
           method: "POST",
           body: JSON.stringify({ message: trimmed }),
         });
+        setChatProviderStatus(
+          payload.provider === "gemini"
+            ? `Using Gemini ${payload.model || ""}`.trim()
+            : payload.reason
+              ? `Using grounded fallback: ${payload.reason}`
+              : "Using grounded fallback",
+        );
         setChatMessages((current) =>
           current.map((item) =>
             item.id === pendingId
               ? {
                   ...item,
-                  content: `${payload.answer}${payload.lastSyncAt ? `\n\nLast sync: ${new Date(payload.lastSyncAt).toLocaleString("en-AU")}` : "\n\nLast sync: never"}`,
+                  content: payload.answer,
+                  provider: payload.provider,
+                  model: payload.model,
                 }
               : item,
           ),
@@ -328,12 +398,16 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
               : item,
           ),
         );
+      } finally {
+        chatSendingRef.current = false;
+        setIsChatSending(false);
       }
     },
     [],
   );
 
   const logOut = useCallback(async () => {
+    window.localStorage.removeItem(CHAT_STORAGE_KEY);
     await apiJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" }).catch(() => ({ ok: true }));
     window.location.href = "/login";
   }, []);
@@ -485,6 +559,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 onDraftChange={setChatDraft}
                 onSend={sendChatMessage}
                 actions={actions}
+                isSending={isChatSending}
+                chatProviderStatus={chatProviderStatus}
               />
             )}
             {activeView === "settings" && (

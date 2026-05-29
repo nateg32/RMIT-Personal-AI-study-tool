@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       ),
       assignmentContexts,
     });
-    return jsonOk({ answer, lastSyncAt: dashboard.lastSyncAt });
+    return jsonOk({ ...answer, lastSyncAt: dashboard.lastSyncAt });
   } catch (error) {
     return jsonError(error, 400);
   }
