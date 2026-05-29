@@ -26,7 +26,7 @@ export default function SettingsView({ dashboard, actions, onConnectCanvas, onLo
     try {
       await onConnectCanvas(canvasBaseUrl, accessToken);
       setAccessToken("");
-      setMessage("Canvas connected and synced.");
+      setMessage("Canvas connected. Use Sync now to import your Canvas data.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not connect Canvas.");
     } finally {
@@ -85,6 +85,10 @@ export default function SettingsView({ dashboard, actions, onConnectCanvas, onLo
                 <p className="font-body-md text-on-primary-container">
                   For v1, Canvas stays read-only. The app syncs courses, assignments, submissions, announcements,
                   files, modules, and rubrics when available.
+                </p>
+                <p className="font-label-md text-label-md text-on-primary-container mt-sm">
+                  Connect validates and saves your token. Run Sync now separately so longer Canvas imports can report
+                  clear progress and errors.
                 </p>
               </div>
               <button

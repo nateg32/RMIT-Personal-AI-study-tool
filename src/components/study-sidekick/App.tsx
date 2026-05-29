@@ -38,11 +38,34 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Authentication required");
   }
 
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const rawPayload = await response.text().catch(() => "");
+  const payload = rawPayload
+    ? (() => {
+        try {
+          return JSON.parse(rawPayload) as unknown;
+        } catch {
+          return null;
+        }
+      })()
+    : {};
+
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+    const payloadObject = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+    const serverError =
+      payloadObject && "error" in payloadObject && typeof payloadObject.error === "string"
+        ? payloadObject.error
+        : payloadObject && "message" in payloadObject && typeof payloadObject.message === "string"
+          ? payloadObject.message
+          : null;
+    const fallbackText = rawPayload
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+
+    throw new Error(serverError || (fallbackText ? `Request failed (${response.status}): ${fallbackText}` : `Request failed (${response.status})`));
   }
-  return payload;
+  return payload as T;
 }
 
 const emptyDashboard: DashboardSummary = {
@@ -195,15 +218,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
 
   const connectCanvas = useCallback(
     async (canvasBaseUrl: string, accessToken: string) => {
-      setActionMessage("Validating your Canvas token server-side...");
+      setActionMessage("Validating and saving your Canvas token server-side...");
       await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", {
         method: "POST",
         body: JSON.stringify({ canvasBaseUrl, accessToken }),
       });
-      setActionMessage("Canvas connected. Starting your first sync...");
-      await syncCanvas();
+      await refreshData();
+      setActionMessage("Canvas connected. Run Sync now when you are ready to import courses, assignments, files, and announcements.");
     },
-    [syncCanvas],
+    [refreshData],
   );
 
   const sendChatMessage = useCallback(
