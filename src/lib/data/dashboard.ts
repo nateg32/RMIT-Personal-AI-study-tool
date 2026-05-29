@@ -98,7 +98,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     }),
   ]);
   const lastSuccessfulSyncAt = latestDate(connection?.lastSyncAt, latestSuccessfulSync?.createdAt);
-  const activeSyncCutoff = new Date(now.getTime() - 15 * 60_000);
+  const activeSyncCutoff = new Date(now.getTime() - 3 * 60_000);
   const syncStillActive = connection?.syncStatus === "syncing" && connection.updatedAt > activeSyncCutoff;
   const abandonedSyncAt =
     connection?.syncStatus === "syncing" && !syncStillActive ? connection.updatedAt : null;

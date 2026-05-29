@@ -222,14 +222,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
 
   const syncCanvas = useCallback(async () => {
     setIsSyncing(true);
-    setActionMessage("Syncing Canvas courses, assignments, files, modules, and announcements...");
+    setActionMessage("Syncing Canvas courses, assignments, submissions, and key announcements...");
     try {
-      const summary = await apiJson<{ courses: number; changes?: Array<{ label: string }> }>("/api/canvas/sync", {
+      const summary = await apiJson<{ courses: number; changes?: Array<{ label: string }>; warnings?: string[] }>("/api/canvas/sync", {
         method: "POST",
       });
       await refreshData();
       const changeCount = summary.changes?.length || 0;
-      setActionMessage(`Canvas sync complete: ${summary.courses} courses checked, ${changeCount} changes detected.`);
+      const warningText = summary.warnings?.length ? ` ${summary.warnings.length} course warnings were skipped to avoid timeout.` : "";
+      setActionMessage(`Canvas sync complete: ${summary.courses} courses checked, ${changeCount} changes detected.${warningText}`);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Canvas sync failed.");
     } finally {
@@ -293,12 +294,14 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           body: JSON.stringify(body),
         });
         setDashboardScope(updated);
-        await refreshData();
         setActionMessage(
           body.action === "reset"
             ? "Dashboard scope reset. The next sync will include all visible Canvas courses and assignments again."
             : "Removed from your dashboard scope. Future Canvas syncs will skip it unless you reset the scope.",
         );
+        void refreshData().catch((error) => {
+          setActionMessage(error instanceof Error ? error.message : "Dashboard scope saved, but refresh failed.");
+        });
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Could not update dashboard scope.");
       }
@@ -446,8 +449,11 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         method: "PATCH",
         body: JSON.stringify({ name }),
       });
-      await refreshData();
+      setDashboard((current) => ({ ...current, userName: name.trim().split(/\s+/)[0] || current.userName }));
       setActionMessage("Display name saved.");
+      void refreshData().catch((error) => {
+        setActionMessage(error instanceof Error ? error.message : "Display name saved, but refresh failed.");
+      });
     },
     [refreshData],
   );

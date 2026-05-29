@@ -23,6 +23,35 @@ const MAX_CANVAS_FILES_PER_COURSE = 35;
 const MAX_CANVAS_MODULES_PER_COURSE = 16;
 const MAX_CANVAS_MODULE_ITEMS_PER_COURSE = 90;
 const MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC = 8;
+const MAX_COURSE_ANNOUNCEMENT_COURSES_PER_CORE_SYNC = 4;
+const CANVAS_REQUEST_TIMEOUT_MS = 8_000;
+
+type CanvasSyncOptions = {
+  includeResources?: boolean;
+};
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+
+  return results;
+}
 
 function parseDate(value?: string | null) {
   return value ? new Date(value) : null;
@@ -126,6 +155,7 @@ export async function getCanvasClientForUser(user: User) {
         iv: connection.tokenIv,
         authTag: connection.tokenAuthTag,
       }),
+      timeoutMs: CANVAS_REQUEST_TIMEOUT_MS,
     });
   }
 
@@ -133,16 +163,18 @@ export async function getCanvasClientForUser(user: User) {
     return new CanvasClient({
       baseUrl: normaliseBaseUrl(env.CANVAS_BASE_URL),
       token: env.CANVAS_ACCESS_TOKEN,
+      timeoutMs: CANVAS_REQUEST_TIMEOUT_MS,
     });
   }
 
   throw new Error("Canvas is not connected");
 }
 
-export async function syncCanvasForUser(user: User) {
+export async function syncCanvasForUser(user: User, options: CanvasSyncOptions = {}) {
   const db = getDb();
   const client = await getCanvasClientForUser(user);
   const changes: ChangeEvent[] = [];
+  const warnings: string[] = [];
   const now = new Date();
   const startDate = new Date(now.getTime() - 365 * 24 * 36e5);
   const endDate = new Date(now.getTime() + 90 * 24 * 36e5);
@@ -194,6 +226,13 @@ export async function syncCanvasForUser(user: User) {
       }
     }
 
+    const visibleActiveCourses = activeCourses.filter((course) => visibleCanvasCourseIds.has(course.id));
+    const coreAnnouncementCourseIds = new Set(
+      visibleActiveCourses
+        .slice(0, MAX_COURSE_ANNOUNCEMENT_COURSES_PER_CORE_SYNC)
+        .map((course) => course.id),
+    );
+
     const saveAnnouncement = async (announcement: CanvasAnnouncement, fallbackCourseId?: number) => {
       const canvasCourseId = announcementCourseId(announcement, fallbackCourseId);
       const courseId = canvasCourseId ? courseIdMap.get(canvasCourseId) : undefined;
@@ -235,15 +274,28 @@ export async function syncCanvasForUser(user: User) {
       });
     };
 
-    for (const course of activeCourses) {
-      if (!visibleCanvasCourseIds.has(course.id)) continue;
-      const courseId = courseIdMap.get(course.id);
+    const courseAssignmentResults = await mapWithConcurrency(
+      visibleActiveCourses,
+      2,
+      async (course) => ({
+        course,
+        courseId: courseIdMap.get(course.id),
+        assignments: await client.getAssignmentsWithSubmissions(course.id).catch((error) => {
+          warnings.push(`${course.name || course.course_code || `Course ${course.id}`}: assignments failed - ${
+            error instanceof Error ? error.message.slice(0, 120) : "unknown Canvas error"
+          }`);
+          return [];
+        }),
+      }),
+    );
+
+    for (const { course, courseId, assignments } of courseAssignmentResults) {
       if (!courseId) continue;
-      const assignments = await client.getAssignmentsWithSubmissions(course.id);
 
       for (const assignment of assignments) {
         if (!isCanvasAssignmentVisible(course.id, assignment.id, preferences)) continue;
         const shouldFetchAssignmentDetails =
+          options.includeResources &&
           assignmentDetailFetches < MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC &&
           (!assignment.description || !assignment.rubric);
         if (shouldFetchAssignmentDetails) assignmentDetailFetches += 1;
@@ -348,10 +400,19 @@ export async function syncCanvasForUser(user: User) {
         }
       }
 
-      const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch(() => []);
-      for (const announcement of courseAnnouncements) {
-        await saveAnnouncement(announcement, course.id);
+      if (!options.includeResources && coreAnnouncementCourseIds.has(course.id)) {
+        const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch((error) => {
+          warnings.push(`${course.name || course.course_code || `Course ${course.id}`}: announcements failed - ${
+            error instanceof Error ? error.message.slice(0, 120) : "unknown Canvas error"
+          }`);
+          return [];
+        });
+        for (const announcement of courseAnnouncements.slice(0, 25)) {
+          await saveAnnouncement(announcement, course.id);
+        }
       }
+
+      if (!options.includeResources) continue;
 
       const files = await client.getCourseFiles(course.id, MAX_CANVAS_FILES_PER_COURSE).catch(() => []);
       for (const file of files.slice(0, MAX_CANVAS_FILES_PER_COURSE)) {
@@ -466,6 +527,8 @@ export async function syncCanvasForUser(user: User) {
       courses: visibleCanvasCourseIds.size,
       skippedCourses: activeCourses.length - visibleCanvasCourseIds.size,
       changes,
+      warnings,
+      mode: options.includeResources ? "full" : "core",
       syncedAt: new Date().toISOString(),
     };
   } catch (error) {
