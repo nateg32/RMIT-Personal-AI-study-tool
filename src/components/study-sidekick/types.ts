@@ -60,11 +60,18 @@ export type AnnouncementSummary = {
 export type FileSummary = {
   id: string;
   courseName: string;
+  courseId?: string | null;
+  assignmentId?: string | null;
+  assignmentName?: string | null;
   name: string;
   contentType?: string | null;
   size?: number | null;
   updatedAtCanvas?: string | null;
+  createdAt?: string | null;
   url?: string | null;
+  source?: "canvas" | "manual_upload";
+  hasIndexedText?: boolean;
+  excerpt?: string | null;
 };
 
 export type CourseDashboardSummary = {
@@ -193,6 +200,13 @@ export type StudySidekickActions = {
   onOpenAnnouncements: () => void;
   onOpenSettings: () => void;
   onOpenChat: (message?: string) => void;
+  onUploadMaterial?: (input: {
+    file?: File | null;
+    title?: string;
+    notes?: string;
+    courseId?: string;
+    assignmentId?: string;
+  }) => Promise<void>;
   actionMessage?: string | null;
   isGeneratingBrief?: boolean;
   isSyncing?: boolean;

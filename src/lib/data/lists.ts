@@ -5,9 +5,14 @@ import { demoDashboard } from "@/lib/mock-data";
 import { isDemoUser } from "@/lib/auth";
 import type { CanvasAssignmentSummary } from "@/lib/types";
 import { sortByPriority, withPrioritySignals } from "@/lib/prioritization";
+import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
+function excerpt(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim().slice(0, 280) || null;
 }
 
 export async function getAssignmentsForUser(user: User): Promise<CanvasAssignmentSummary[]> {
@@ -83,21 +88,61 @@ export async function getAnnouncementsForUser(user: User) {
 export async function getFilesForUser(user: User) {
   if (isDemoUser(user) || !env.DATABASE_URL) return demoDashboard.files;
   const db = getDb();
-  const files = await db.canvasFile.findMany({
-    where: { userId: user.id },
-    include: { course: true },
-    orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
-    take: 100,
+  const [canvasFiles, uploadedSnapshots] = await Promise.all([
+    db.canvasFile.findMany({
+      where: { userId: user.id },
+      include: { course: true },
+      orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
+      take: 120,
+    }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      take: 120,
+      orderBy: [{ createdAt: "desc" }],
+    }),
+  ]);
+  const uploadedFiles = uploadedSnapshots
+    .map((snapshot) => parseManualMaterial(snapshot.metadata))
+    .filter((file): file is ManualMaterialMetadata => Boolean(file));
+
+  return [
+    ...uploadedFiles.map((file) => ({
+      id: file.id,
+      courseId: file.courseId,
+      assignmentId: file.assignmentId,
+      assignmentName: file.assignmentName || null,
+      courseName: file.courseName || "Manual library",
+      name: file.name,
+      contentType: file.contentType,
+      size: file.size,
+      updatedAtCanvas: file.createdAt,
+      createdAt: file.createdAt,
+      url: null,
+      source: "manual_upload" as const,
+      hasIndexedText: Boolean(file.extractedText || file.notes),
+      excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
+    })),
+    ...canvasFiles.map((file) => ({
+      id: file.id,
+      courseId: file.courseId,
+      assignmentId: null,
+      assignmentName: null,
+      courseName: file.course.name,
+      name: file.name,
+      contentType: file.contentType,
+      size: file.size,
+      updatedAtCanvas: file.updatedAtCanvas?.toISOString() || null,
+      createdAt: file.createdAt.toISOString(),
+      url: file.url,
+      source: "canvas" as const,
+      hasIndexedText: false,
+      excerpt: null,
+    })),
+  ].sort((a, b) => {
+    const left = new Date(a.updatedAtCanvas || a.createdAt || 0).getTime();
+    const right = new Date(b.updatedAtCanvas || b.createdAt || 0).getTime();
+    return right - left;
   });
-  return files.map((file) => ({
-    id: file.id,
-    courseName: file.course.name,
-    name: file.name,
-    contentType: file.contentType,
-    size: file.size,
-    updatedAtCanvas: file.updatedAtCanvas?.toISOString() || null,
-    url: file.url,
-  }));
 }
 
 export async function getStudySessionsForUser(user: User) {

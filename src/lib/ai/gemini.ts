@@ -273,12 +273,15 @@ export async function chatWithCanvasContext(input: {
   lastSyncAt?: string | null;
   due: CanvasAssignmentSummary[];
   announcements: string[];
+  files: string[];
   assignmentContexts: AssignmentContextPack[];
 }) {
   const ai = gemini();
   const facts = `Last sync: ${input.lastSyncAt || "never"}\nAssignments: ${JSON.stringify(
     input.due,
-  )}\nAnnouncements: ${JSON.stringify(input.announcements)}\nAssignment context packs: ${JSON.stringify(
+  )}\nAnnouncements: ${JSON.stringify(input.announcements)}\nFiles and manual materials: ${JSON.stringify(
+    input.files,
+  )}\nAssignment context packs: ${JSON.stringify(
     input.assignmentContexts,
   )}`;
 
@@ -367,12 +370,25 @@ function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) 
     const announcementLine = input.announcements.length
       ? `Recent announcements to check:\n${input.announcements.slice(0, 4).map((item) => `- ${item}`).join("\n")}`
       : "No recent announcements were included in the current dashboard sync.";
+    const fileLine = input.files.length
+      ? `Files/manual materials I can see:\n${input.files.slice(0, 6).map((item) => `- ${item}`).join("\n")}`
+      : "No Canvas files or manual uploads are indexed yet.";
 
     return [
       "Here is the safest order from your synced Canvas data:",
       ordered,
       announcementLine,
+      fileLine,
       "I am using the local priority algorithm because the AI provider is unavailable right now. I will still avoid inventing Canvas facts.",
+      `Last sync: ${lastSync}.`,
+    ].join("\n\n");
+  }
+
+  if (input.files.length && /(file|upload|material|slide|lecture|brief|rubric)/i.test(message)) {
+    return [
+      "Here are the files and manual materials I can see right now:",
+      input.files.slice(0, 10).map((item, index) => `${index + 1}. ${item}`).join("\n"),
+      "Ask me about one by name and I will connect it to the closest assignment context I can find.",
       `Last sync: ${lastSync}.`,
     ].join("\n\n");
   }

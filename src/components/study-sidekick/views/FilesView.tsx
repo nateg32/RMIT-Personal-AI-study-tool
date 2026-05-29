@@ -26,10 +26,19 @@ function openCanvas(url?: string | null) {
 export default function FilesView({ files, courses, actions }: FilesViewProps) {
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<"recent" | "course">("recent");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadNotes, setUploadNotes] = useState("");
+  const [uploadCourseId, setUploadCourseId] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
   const visibleFiles = useMemo(() => {
     const query = search.trim().toLowerCase();
     return files.filter((file) =>
-      query ? `${file.name} ${file.courseName} ${file.contentType || ""}`.toLowerCase().includes(query) : true,
+      query
+        ? `${file.name} ${file.courseName} ${file.assignmentName || ""} ${file.contentType || ""} ${file.excerpt || ""}`
+            .toLowerCase()
+            .includes(query)
+        : true,
     );
   }, [files, search]);
   const grouped = useMemo(() => {
@@ -39,6 +48,33 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
     }
     return Array.from(map.entries());
   }, [visibleFiles]);
+
+  const uploadMaterial = async () => {
+    if (!actions.onUploadMaterial || isUploading) return;
+    setIsUploading(true);
+    try {
+      await actions.onUploadMaterial({
+        file: uploadFile,
+        title: uploadTitle,
+        notes: uploadNotes,
+        courseId: uploadCourseId || undefined,
+      });
+      setUploadFile(null);
+      setUploadTitle("");
+      setUploadNotes("");
+      setUploadCourseId("");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const openFile = (file: FileSummary) => {
+    if (file.url) {
+      openCanvas(file.url);
+      return;
+    }
+    actions.onOpenChat(`Use my uploaded material "${file.name}" to help me plan what to study.`);
+  };
 
   return (
     <div className="px-margin-desktop pb-lg min-h-screen w-full relative">
@@ -86,6 +122,75 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
         </div>
       </section>
 
+      <section className="mb-lg grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-gutter max-w-7xl mx-auto w-full">
+        <div className="sticky-note bg-primary-container/25 border-2 border-primary-fixed-dim rounded-lg p-md">
+          <div className="flex items-center gap-sm mb-sm">
+            <span className="material-symbols-outlined text-primary">upload_file</span>
+            <h2 className="font-headline-md text-headline-md text-primary">Upload study material</h2>
+          </div>
+          <p className="font-body-md text-body-md text-on-surface-variant mb-md max-w-3xl">
+            Add assignment briefs, lecture notes, rubric text, or slides when Canvas file syncing is slow. Text files are indexed automatically; for PDFs or slides, paste the key brief/rubric notes so AI can use them.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+            <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">
+              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">File</span>
+              <input
+                type="file"
+                className="font-label-md text-label-md min-w-0"
+                onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+              />
+            </label>
+            <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">
+              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Course</span>
+              <select
+                value={uploadCourseId}
+                onChange={(event) => setUploadCourseId(event.target.value)}
+                className="bg-transparent font-body-md focus:outline-none"
+              >
+                <option value="">Manual library</option>
+                {courses.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {course.courseCode || course.name}: {course.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[0.8fr_1.2fr] gap-sm mt-sm">
+            <input
+              value={uploadTitle}
+              onChange={(event) => setUploadTitle(event.target.value)}
+              placeholder="Optional title if you are pasting notes only"
+              className="bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+            />
+            <textarea
+              value={uploadNotes}
+              onChange={(event) => setUploadNotes(event.target.value)}
+              placeholder="Paste brief/rubric/lecture highlights for PDFs, slides, screenshots, or anything Canvas will not sync..."
+              className="bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
+            />
+          </div>
+          <button
+            type="button"
+            className="mt-md bg-primary text-on-primary px-lg py-sm rounded-full font-label-md text-label-md bubbly-button disabled:opacity-60"
+            onClick={uploadMaterial}
+            disabled={isUploading || !actions.onUploadMaterial || (!uploadFile && !uploadNotes.trim())}
+          >
+            {isUploading ? "Indexing..." : "Save to AI materials"}
+          </button>
+        </div>
+
+        <div className="sticky-note bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md">
+          <div className="flex items-center gap-sm mb-sm">
+            <span className="material-symbols-outlined text-secondary">tips_and_updates</span>
+            <h2 className="font-headline-sm text-headline-sm">Cheapest path</h2>
+          </div>
+          <p className="font-body-md text-body-md text-on-surface-variant">
+            Manual notes are cheaper than forcing Canvas to fetch every file because we only store searchable text snippets. Full binary storage and deep PDF parsing can come later with Supabase Storage if you need downloads.
+          </p>
+        </div>
+      </section>
+
       {mode === "course" ? (
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter mb-xl relative z-10">
           {grouped.map(([courseName, items], index) => (
@@ -108,7 +213,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
                     key={file.id}
                     type="button"
                     className="w-8 h-8 rounded-full bg-white border-2 border-primary-container flex items-center justify-center text-[12px] font-bold"
-                    onClick={() => openCanvas(file.url)}
+                    onClick={() => openFile(file)}
                     title={file.name}
                   >
                     {fileIcon(file.contentType).slice(0, 3).toUpperCase()}
@@ -131,13 +236,19 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
                     ? "bg-tertiary-container/40 border-tertiary-fixed-dim"
                     : "bg-primary-container/20 border-primary-fixed-dim"
               } border-2 p-md rounded-lg flex flex-col items-center text-center min-h-[190px]`}
-              onClick={() => openCanvas(file.url)}
+              onClick={() => openFile(file)}
             >
               <div className="w-20 h-20 bg-white/70 rounded-lg flex items-center justify-center mb-md">
                 <span className="material-symbols-outlined text-primary text-[40px]">{fileIcon(file.contentType)}</span>
               </div>
+              <span className="mb-xs px-sm py-1 rounded-full bg-white/70 border border-surface-variant font-label-sm text-label-sm text-on-surface-variant">
+                {file.source === "manual_upload" ? "Manual" : "Canvas"}
+              </span>
               <p className="font-label-md text-label-md font-bold mb-xs truncate w-full">{file.name}</p>
               <p className="font-label-sm text-label-sm text-on-surface-variant truncate w-full">{file.courseName}</p>
+              {file.assignmentName ? (
+                <p className="font-label-sm text-label-sm text-secondary truncate w-full">{file.assignmentName}</p>
+              ) : null}
               <p className="font-label-sm text-label-sm text-on-surface-variant">{fileSizeLabel(file.size)}</p>
             </button>
           ))}
@@ -145,14 +256,14 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
       )}
 
       {!visibleFiles.length ? (
-        <section className="max-w-4xl mx-auto">
-          <div className="drag-area p-xl rounded-lg bg-surface-container-low flex flex-col items-center justify-center text-center hover:border-primary hover:bg-primary-container/20 transition-all">
+        <section className="max-w-4xl mx-auto w-full">
+          <div className="drag-area p-xl rounded-lg bg-surface-container-low flex flex-col items-center justify-center text-center hover:border-primary hover:bg-primary-container/20 transition-all w-full">
             <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-md mb-md transform rotate-3">
               <span className="material-symbols-outlined text-primary text-[48px]">cloud_sync</span>
             </div>
-            <h3 className="font-headline-md text-headline-md text-primary mb-xs">No Canvas files loaded yet</h3>
-            <p className="font-body-md text-on-surface-variant max-w-sm">
-              Run a Canvas sync to pull recent files and module resources for your courses.
+            <h3 className="font-headline-md text-headline-md text-primary mb-xs w-full">No study materials loaded yet</h3>
+            <p className="font-body-md text-on-surface-variant max-w-2xl w-full whitespace-normal">
+              Upload a brief or paste rubric notes above, or run a Canvas sync to pull recent files and module resources for your courses.
             </p>
             <button
               type="button"

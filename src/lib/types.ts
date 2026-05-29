@@ -102,6 +102,7 @@ export type AssignmentContextResource = {
   type: string;
   moduleName?: string | null;
   url?: string | null;
+  excerpt?: string | null;
 };
 
 export type AssignmentContextPack = {
@@ -150,9 +151,16 @@ export type DashboardSummary = {
   files: Array<{
     id: string;
     courseName: string;
+    courseId?: string | null;
+    assignmentId?: string | null;
+    assignmentName?: string | null;
     name: string;
     updatedAtCanvas?: string | null;
+    createdAt?: string | null;
     url?: string | null;
+    source?: "canvas" | "manual_upload";
+    hasIndexedText?: boolean;
+    excerpt?: string | null;
   }>;
   riskLevel: RiskLevel;
   priorityItems?: CanvasAssignmentSummary[];

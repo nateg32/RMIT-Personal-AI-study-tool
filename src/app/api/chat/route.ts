@@ -39,6 +39,11 @@ export async function POST(request: Request) {
         ...dashboard.unsubmitted,
       ]).slice(0, 16),
       announcements: dashboard.announcements.map((item) => `${item.courseName}: ${item.title}`),
+      files: dashboard.files.map((item) =>
+        `${item.source === "manual_upload" ? "Manual upload" : "Canvas file"} - ${item.courseName}${
+          item.assignmentName ? ` / ${item.assignmentName}` : ""
+        }: ${item.name}${item.excerpt ? ` - ${item.excerpt}` : ""}`,
+      ),
       assignmentContexts,
     });
     return jsonOk({ answer, lastSyncAt: dashboard.lastSyncAt });

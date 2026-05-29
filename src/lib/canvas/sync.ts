@@ -13,6 +13,10 @@ type ChangeEvent = {
   label: string;
 };
 
+const MAX_CANVAS_FILES_PER_COURSE = 80;
+const MAX_CANVAS_MODULES_PER_COURSE = 35;
+const MAX_CANVAS_MODULE_ITEMS_PER_COURSE = 220;
+
 function parseDate(value?: string | null) {
   return value ? new Date(value) : null;
 }
@@ -315,8 +319,8 @@ export async function syncCanvasForUser(user: User) {
         }
       }
 
-      const files = await client.getCourseFiles(course.id).catch(() => []);
-      for (const file of files) {
+      const files = await client.getCourseFiles(course.id, MAX_CANVAS_FILES_PER_COURSE).catch(() => []);
+      for (const file of files.slice(0, MAX_CANVAS_FILES_PER_COURSE)) {
         const name = file.display_name || file.filename || `File ${file.id}`;
         const change = await snapshot(
           user.id,
@@ -349,9 +353,12 @@ export async function syncCanvasForUser(user: User) {
         });
       }
 
-      const modules = await client.getCourseModulesWithItems(course.id).catch(() => []);
-      for (const courseModule of modules) {
+      const modules = await client.getCourseModulesWithItems(course.id, MAX_CANVAS_MODULES_PER_COURSE).catch(() => []);
+      let moduleItemCount = 0;
+      for (const courseModule of modules.slice(0, MAX_CANVAS_MODULES_PER_COURSE)) {
         for (const item of courseModule.items || []) {
+          if (moduleItemCount >= MAX_CANVAS_MODULE_ITEMS_PER_COURSE) break;
+          moduleItemCount += 1;
           const title = stripCanvasHtml(item.title) || `${item.type || "Module item"} ${item.id}`;
           const resourceType = item.type || "unknown";
           const change = await snapshot(
@@ -401,6 +408,7 @@ export async function syncCanvasForUser(user: User) {
             },
           });
         }
+        if (moduleItemCount >= MAX_CANVAS_MODULE_ITEMS_PER_COURSE) break;
       }
     }
 

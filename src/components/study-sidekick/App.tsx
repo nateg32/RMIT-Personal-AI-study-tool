@@ -26,12 +26,15 @@ import type {
 } from "./types";
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(path, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
+    headers: isFormData
+      ? init?.headers
+      : {
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
   });
 
   if (response.status === 401) {
@@ -248,6 +251,33 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     [refreshData],
   );
 
+  const uploadMaterial = useCallback(
+    async (input: { file?: File | null; title?: string; notes?: string; courseId?: string; assignmentId?: string }) => {
+      setActionMessage("Indexing your study material for Files, AI chat, and study sessions...");
+      const formData = new FormData();
+      if (input.file) formData.append("file", input.file);
+      if (input.title) formData.append("title", input.title);
+      if (input.notes) formData.append("notes", input.notes);
+      if (input.courseId) formData.append("courseId", input.courseId);
+      if (input.assignmentId) formData.append("assignmentId", input.assignmentId);
+
+      try {
+        await apiJson<{ id: string; name: string; hasIndexedText: boolean }>("/api/uploads", {
+          method: "POST",
+          body: formData,
+        });
+        await refreshData();
+        setActionMessage(
+          "Material saved. AI chat and new study sessions can now use it alongside Canvas assignments, courses, and announcements.",
+        );
+      } catch (error) {
+        setActionMessage(error instanceof Error ? error.message : "Material upload failed.");
+        throw error;
+      }
+    },
+    [refreshData],
+  );
+
   const connectCanvas = useCallback(
     async (canvasBaseUrl: string, accessToken: string) => {
       setActionMessage("Validating and saving your Canvas token server-side...");
@@ -333,11 +363,12 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       onOpenAnnouncements: () => setActiveView("announcements"),
       onOpenSettings: () => setActiveView("settings"),
       onOpenChat: openChat,
+      onUploadMaterial: uploadMaterial,
       actionMessage,
       isGeneratingBrief,
       isSyncing,
     }),
-    [actionMessage, generateBrief, isGeneratingBrief, isSyncing, openChat, startSession, syncCanvas],
+    [actionMessage, generateBrief, isGeneratingBrief, isSyncing, openChat, startSession, syncCanvas, uploadMaterial],
   );
 
   const mobileItems: Array<{ view: ViewType; icon: string }> = [

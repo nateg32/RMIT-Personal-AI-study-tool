@@ -88,6 +88,9 @@ export default function StudySessionsView({
   const [mode, setMode] = useState("Plan assignment");
   const [targetOutcome, setTargetOutcome] = useState("Credit");
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: 50 * 60, running: false });
+  const [sessionUploadFile, setSessionUploadFile] = useState<File | null>(null);
+  const [sessionUploadNotes, setSessionUploadNotes] = useState("");
+  const [isUploadingMaterial, setIsUploadingMaterial] = useState(false);
 
   const selectedSession = selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) || null : null;
   const assignmentFromSession = selectedSession?.assignmentId
@@ -149,6 +152,23 @@ export default function StudySessionsView({
       energyLevel,
       targetOutcome,
     });
+  };
+
+  const uploadSessionMaterial = async () => {
+    if (!actions.onUploadMaterial || !selectedAssignment || isUploadingMaterial) return;
+    setIsUploadingMaterial(true);
+    try {
+      await actions.onUploadMaterial({
+        file: sessionUploadFile,
+        notes: sessionUploadNotes,
+        assignmentId: selectedAssignment.id,
+        courseId: selectedAssignment.courseId,
+      });
+      setSessionUploadFile(null);
+      setSessionUploadNotes("");
+    } finally {
+      setIsUploadingMaterial(false);
+    }
   };
 
   const saveSessionDetails = async () => {
@@ -322,6 +342,43 @@ export default function StudySessionsView({
                     : "Mark done elsewhere"}
                 </button>
               ) : null}
+            </div>
+
+            <div className="sticky-note bg-primary-container/25 p-md rounded-lg border-2 border-primary-fixed-dim rotate-1">
+              <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">attach_file_add</span>
+                <h3 className="font-headline-md text-headline-md">Add context before planning</h3>
+              </div>
+              <p className="font-body-md text-body-md text-on-surface-variant mb-sm">
+                Attach the assignment brief, slides, or paste rubric notes here. The next generated plan will use this material.
+              </p>
+              <input
+                type="file"
+                className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-label-md text-label-md"
+                onChange={(event) => setSessionUploadFile(event.target.files?.[0] || null)}
+                disabled={!selectedAssignment}
+              />
+              <textarea
+                value={sessionUploadNotes}
+                onChange={(event) => setSessionUploadNotes(event.target.value)}
+                placeholder="Paste brief/rubric/lecture slide highlights if the file is a PDF, image, or PowerPoint..."
+                className="mt-sm w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
+                disabled={!selectedAssignment}
+              />
+              <button
+                type="button"
+                className="mt-sm bubbly-button w-full bg-secondary text-on-secondary font-bold py-sm rounded-lg flex items-center justify-center gap-sm disabled:opacity-60"
+                onClick={uploadSessionMaterial}
+                disabled={
+                  !selectedAssignment ||
+                  !actions.onUploadMaterial ||
+                  isUploadingMaterial ||
+                  (!sessionUploadFile && !sessionUploadNotes.trim())
+                }
+              >
+                <span className="material-symbols-outlined">library_add</span>
+                {isUploadingMaterial ? "Adding material..." : "Add to this assignment"}
+              </button>
             </div>
 
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">

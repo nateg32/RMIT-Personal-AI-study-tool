@@ -173,13 +173,14 @@ export class CanvasClient {
     );
   }
 
-  async getCourseFiles(courseId: number) {
-    return this.getAllPages<CanvasFile>(`/api/v1/courses/${courseId}/files?per_page=50`);
+  async getCourseFiles(courseId: number, maxItems?: number) {
+    return this.getAllPages<CanvasFile>(`/api/v1/courses/${courseId}/files?per_page=50`, maxItems);
   }
 
-  async getCourseModulesWithItems(courseId: number) {
+  async getCourseModulesWithItems(courseId: number, maxItems?: number) {
     return this.getAllPages<CanvasModule>(
       `/api/v1/courses/${courseId}/modules?include[]=items&per_page=50`,
+      maxItems,
     );
   }
 
@@ -191,16 +192,16 @@ export class CanvasClient {
     }
   }
 
-  async getAllPages<T>(pathOrUrl: string) {
+  async getAllPages<T>(pathOrUrl: string, maxItems?: number) {
     const items: T[] = [];
     let nextUrl: string | null = this.toUrl(pathOrUrl);
-    while (nextUrl) {
+    while (nextUrl && (!maxItems || items.length < maxItems)) {
       const page: { data: T[]; next: string | null } =
         await this.requestWithMeta<T[]>(nextUrl);
       items.push(...page.data);
       nextUrl = page.next;
     }
-    return items;
+    return maxItems ? items.slice(0, maxItems) : items;
   }
 
   async request<T>(pathOrUrl: string) {

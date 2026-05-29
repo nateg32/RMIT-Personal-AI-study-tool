@@ -6,6 +6,7 @@ import { env } from "@/lib/env";
 import { demoDashboard } from "@/lib/mock-data";
 import { getUrgency, withPrioritySignals } from "@/lib/prioritization";
 import type { AssignmentContextPack, AssignmentContextResource, CanvasAssignmentSummary } from "@/lib/types";
+import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
 
 const RESOURCE_KEYWORDS = [
   "assignment",
@@ -51,6 +52,10 @@ function criteriaFromRubricSummary(summary: string | null | undefined) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 10);
+}
+
+function excerpt(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim().slice(0, 1_500) || null;
 }
 
 function stringArray(value: unknown) {
@@ -142,6 +147,21 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
     orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
     take: 80,
   });
+  const uploadedSnapshots = await db.syncSnapshot.findMany({
+    where: { userId: user.id, type: "manual_upload" },
+    orderBy: [{ createdAt: "desc" }],
+    take: 200,
+  });
+  const uploadedFiles = uploadedSnapshots
+    .map((snapshot) => parseManualMaterial(snapshot.metadata))
+    .filter((file): file is ManualMaterialMetadata => {
+      if (!file) return false;
+      return (
+        file.assignmentId === assignment.id ||
+        (!file.assignmentId && file.courseId === assignment.courseId) ||
+        (!file.assignmentId && !file.courseId)
+      );
+    });
   const resources = await db.canvasResource.findMany({
     where: { userId: user.id, courseId: assignment.courseId },
     orderBy: [{ position: "asc" }, { createdAt: "desc" }],
@@ -163,6 +183,27 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
         url: file.url,
       } satisfies AssignmentContextResource,
     }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((item) => item.resource);
+
+  const relatedUploadedFiles = uploadedFiles
+    .map((file) => {
+      const indexedText = [file.notes, file.extractedText].filter(Boolean).join("\n\n");
+      return {
+        score: scoreText(
+          queryWords,
+          `${file.name} ${file.contentType || ""} ${file.assignmentName || ""} ${indexedText}`,
+        ) + (file.assignmentId === assignment.id ? 6 : 0),
+        resource: {
+          title: file.name,
+          type: "Manual upload",
+          moduleName: file.assignmentName || file.courseName || "Manual library",
+          url: null,
+          excerpt: excerpt(indexedText),
+        } satisfies AssignmentContextResource,
+      };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 8)
     .map((item) => item.resource);
@@ -208,7 +249,9 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
   const missingContext = [];
   if (!assignment.description) missingContext.push("Assignment description was not available from Canvas.");
   if (!assignment.rubricSummary) missingContext.push("Rubric was not available from Canvas.");
-  if (relatedFiles.length === 0) missingContext.push("No related files were found in the latest sync.");
+  if (relatedFiles.length === 0 && relatedUploadedFiles.length === 0) {
+    missingContext.push("No related files or manual materials were found in the latest sync.");
+  }
   if (relatedResources.length === 0) missingContext.push("No module resources were found in the latest sync.");
 
   const confidence =
@@ -228,7 +271,7 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
       courseCode: assignment.course.courseCode,
     },
     rubricCriteria: criteriaFromRubricSummary(assignment.rubricSummary),
-    relatedFiles,
+    relatedFiles: [...relatedUploadedFiles, ...relatedFiles].slice(0, 12),
     relatedResources,
     recentAnnouncements: announcements.map((announcement) => ({
       title: announcement.title,
@@ -251,19 +294,39 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
   }
 
   const db = getDb();
-  const assignments = await db.assignment.findMany({
-    where: { userId: user.id },
-    include: { course: true, submission: true },
-    orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
-    take: 80,
-  });
+  const [assignments, uploadedSnapshots] = await Promise.all([
+    db.assignment.findMany({
+      where: { userId: user.id },
+      include: { course: true, submission: true },
+      orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
+      take: 80,
+    }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      select: { metadata: true },
+      take: 200,
+      orderBy: [{ createdAt: "desc" }],
+    }),
+  ]);
+  const uploadedFiles = uploadedSnapshots
+    .map((snapshot) => parseManualMaterial(snapshot.metadata))
+    .filter((file): file is ManualMaterialMetadata => Boolean(file));
 
   const messageWords = words(message);
   const ranked = assignments
     .map((assignment) => {
+      const matchingUploads = uploadedFiles
+        .filter(
+          (file) =>
+            file.assignmentId === assignment.id ||
+            (!file.assignmentId && file.courseId === assignment.courseId) ||
+            (!file.assignmentId && !file.courseId),
+        )
+        .map((file) => `${file.name} ${file.notes || ""} ${file.extractedText || ""}`)
+        .join(" ");
       const text = `${assignment.name} ${assignment.description || ""} ${assignment.course.name} ${
         assignment.course.courseCode || ""
-      }`;
+      } ${matchingUploads}`;
       const summary = withPrioritySignals({
         id: assignment.id,
         courseId: assignment.courseId,

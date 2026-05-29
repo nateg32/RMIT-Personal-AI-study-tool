@@ -6,6 +6,7 @@ import { demoDashboard } from "@/lib/mock-data";
 import { getOverallRisk, isSubmitted, sortByPriority, withPrioritySignals } from "@/lib/prioritization";
 import type { CanvasAssignmentSummary, DashboardSummary } from "@/lib/types";
 import { isDemoUser } from "@/lib/auth";
+import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
@@ -50,6 +51,10 @@ function assignmentSummary(assignment: {
     missing: assignment.submission?.missing,
     late: assignment.submission?.late,
   };
+}
+
+function excerpt(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim().slice(0, 220) || null;
 }
 
 export async function getDashboardData(user: User): Promise<DashboardSummary> {
@@ -110,19 +115,40 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     take: 200,
   });
 
-  const files = await db.canvasFile.findMany({
-    where: { userId: user.id },
-    include: { course: true },
-    orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
-    take: 8,
-  });
+  const [files, uploadedSnapshots] = await Promise.all([
+    db.canvasFile.findMany({
+      where: { userId: user.id },
+      include: { course: true },
+      orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
+      take: 8,
+    }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      orderBy: [{ createdAt: "desc" }],
+      take: 8,
+    }),
+  ]);
+  const uploadedFiles = uploadedSnapshots
+    .map((snapshot) => parseManualMaterial(snapshot.metadata))
+    .filter((file): file is ManualMaterialMetadata => Boolean(file));
 
-  const allRecentFiles = await db.canvasFile.findMany({
-    where: { userId: user.id },
-    select: { courseId: true, updatedAtCanvas: true, createdAt: true },
-    orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
-    take: 200,
-  });
+  const [allRecentFiles, allRecentUploads] = await Promise.all([
+    db.canvasFile.findMany({
+      where: { userId: user.id },
+      select: { courseId: true, updatedAtCanvas: true, createdAt: true },
+      orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
+      take: 200,
+    }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      select: { metadata: true, createdAt: true },
+      orderBy: [{ createdAt: "desc" }],
+      take: 200,
+    }),
+  ]);
+  const recentUploadMaterials = allRecentUploads
+    .map((snapshot) => parseManualMaterial(snapshot.metadata))
+    .filter((file): file is ManualMaterialMetadata => Boolean(file));
 
   const stale = !lastSyncAt || lastSyncAt < subHours(now, 12);
   const priority = unsubmitted.slice(0, 6);
@@ -147,7 +173,9 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
       dueToday: courseDueToday.length,
       dueThisWeek: courseDueThisWeek.length,
       recentAnnouncements: allRecentAnnouncements.filter((announcement) => announcement.courseId === course.id).length,
-      recentFiles: allRecentFiles.filter((file) => file.courseId === course.id).length,
+      recentFiles:
+        allRecentFiles.filter((file) => file.courseId === course.id).length +
+        recentUploadMaterials.filter((file) => file.courseId === course.id).length,
       riskLevel: getOverallRisk(courseUnsubmitted),
       nextAssignment: rankedCourseAssignments[0] || null,
     };
@@ -174,13 +202,40 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
       postedAt: announcement.postedAt?.toISOString() || null,
       htmlUrl: announcement.htmlUrl,
     })),
-    files: files.map((file) => ({
-      id: file.id,
-      courseName: file.course.name,
-      name: file.name,
-      updatedAtCanvas: file.updatedAtCanvas?.toISOString() || null,
-      url: file.url,
-    })),
+    files: [
+      ...uploadedFiles.map((file) => ({
+        id: file.id,
+        courseId: file.courseId,
+        assignmentId: file.assignmentId,
+        assignmentName: file.assignmentName || null,
+        courseName: file.courseName || "Manual library",
+        name: file.name,
+        updatedAtCanvas: file.createdAt,
+        createdAt: file.createdAt,
+        url: null,
+        source: "manual_upload" as const,
+        hasIndexedText: Boolean(file.extractedText || file.notes),
+        excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
+      })),
+      ...files.map((file) => ({
+        id: file.id,
+        courseId: file.courseId,
+        assignmentId: null,
+        assignmentName: null,
+        courseName: file.course.name,
+        name: file.name,
+        updatedAtCanvas: file.updatedAtCanvas?.toISOString() || null,
+        createdAt: file.createdAt.toISOString(),
+        url: file.url,
+        source: "canvas" as const,
+        hasIndexedText: false,
+        excerpt: null,
+      })),
+    ].sort((a, b) => {
+      const left = new Date(a.updatedAtCanvas || a.createdAt || 0).getTime();
+      const right = new Date(b.updatedAtCanvas || b.createdAt || 0).getTime();
+      return right - left;
+    }).slice(0, 8),
     priorityItems: priority,
     courseBreakdown,
   };
