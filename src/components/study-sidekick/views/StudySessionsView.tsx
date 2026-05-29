@@ -29,6 +29,7 @@ const durations = [25, 50, 90, 120];
 const energyLevels = ["Low", "Medium", "High"];
 const modes = ["Understand task", "Plan assignment", "Write draft", "Final review", "Emergency mode"];
 const outcomes = ["Just complete", "Credit", "Distinction", "HD"];
+type SessionMode = "canvas" | "custom";
 
 function fallbackPlan(assignment?: AssignmentSummary | null, duration = 50): StudyPlan {
   const title = assignment ? `${assignment.name} Battle Plan` : "Canvas Study Session";
@@ -83,10 +84,13 @@ export default function StudySessionsView({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
+  const [sessionMode, setSessionMode] = useState<SessionMode>("canvas");
   const [duration, setDuration] = useState(50);
   const [energyLevel, setEnergyLevel] = useState("Medium");
   const [mode, setMode] = useState("Plan assignment");
   const [targetOutcome, setTargetOutcome] = useState("Credit");
+  const [customTitle, setCustomTitle] = useState("");
+  const [customFocus, setCustomFocus] = useState("");
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: 50 * 60, running: false });
   const [sessionUploadFile, setSessionUploadFile] = useState<File | null>(null);
   const [sessionUploadNotes, setSessionUploadNotes] = useState("");
@@ -97,10 +101,13 @@ export default function StudySessionsView({
     ? assignments.find((assignment) => assignment.id === selectedSession.assignmentId) || null
     : null;
   const selectedAssignment =
-    assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignmentFromSession || assignments[0] || null;
+    sessionMode === "custom" && !assignmentFromSession
+      ? null
+      : assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignmentFromSession || assignments[0] || null;
   const activeSession =
     selectedSession ||
     sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) ||
+    (sessionMode === "custom" ? sessions.find((session) => !session.assignmentId) || null : null) ||
     null;
   const plan = activeSession?.generatedPlanJson || fallbackPlan(selectedAssignment, duration);
   const safeActiveBlockIndex = Math.min(activeBlockIndex, Math.max(0, plan.blocks.length - 1));
@@ -141,6 +148,23 @@ export default function StudySessionsView({
   const progress = totalSeconds ? Math.round(((totalSeconds - secondsLeft) / totalSeconds) * 691) : 0;
 
   const generateSession = () => {
+    if (sessionMode === "custom") {
+      if (!customTitle.trim() && !customFocus.trim()) {
+        actions.onOpenChat("Help me choose a clear focus for a custom study session.");
+        return;
+      }
+      onCreateSession({
+        assignmentId: null,
+        customTitle: customTitle.trim() || "Custom focus session",
+        customFocus: customFocus.trim() || undefined,
+        durationMinutes: duration,
+        mode,
+        energyLevel,
+        targetOutcome,
+      });
+      return;
+    }
+
     if (!selectedAssignment) {
       actions.onOpenChat("I need to connect Canvas before creating a study session.");
       return;
@@ -155,14 +179,15 @@ export default function StudySessionsView({
   };
 
   const uploadSessionMaterial = async () => {
-    if (!actions.onUploadMaterial || !selectedAssignment || isUploadingMaterial) return;
+    if (!actions.onUploadMaterial || isUploadingMaterial) return;
     setIsUploadingMaterial(true);
     try {
       await actions.onUploadMaterial({
         file: sessionUploadFile,
         notes: sessionUploadNotes,
-        assignmentId: selectedAssignment.id,
-        courseId: selectedAssignment.courseId,
+        title: sessionMode === "custom" ? customTitle || "Custom focus material" : undefined,
+        assignmentId: sessionMode === "canvas" ? selectedAssignment?.id : undefined,
+        courseId: sessionMode === "canvas" ? selectedAssignment?.courseId : undefined,
       });
       setSessionUploadFile(null);
       setSessionUploadNotes("");
@@ -197,7 +222,15 @@ export default function StudySessionsView({
     setTargetOutcome(session.targetOutcome || "Credit");
     setSessionTitle(session.title);
     setActiveBlockIndex(session.generatedPlanJson.activeBlockIndex || 0);
-    if (session.assignmentId) onSelectAssignment(session.assignmentId);
+    if (session.assignmentId) {
+      setSessionMode("canvas");
+      onSelectAssignment(session.assignmentId);
+    } else {
+      setSessionMode("custom");
+      onSelectAssignment(null);
+      setCustomTitle(session.title);
+      setCustomFocus(session.generatedPlanJson.assignmentBrief || "");
+    }
   };
 
   const selectBlock = async (index: number) => {
@@ -224,6 +257,13 @@ export default function StudySessionsView({
     await onUpdateSession(activeSession.id, nextPlan, completedMap[item] ? "planned" : "in_progress");
   };
 
+  const askAboutSession = () => {
+    const blockTasks = activeBlock?.tasks?.length ? ` Tasks: ${activeBlock.tasks.join("; ")}` : "";
+    actions.onOpenChat(
+      `Help me with this focus session: ${plan.title}. Current block: ${activeBlock?.name || "not selected"}.${blockTasks}`,
+    );
+  };
+
   return (
     <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
       <ViewHeader
@@ -240,20 +280,61 @@ export default function StudySessionsView({
             <p className="text-body-lg font-body-lg text-on-surface-variant flex items-center gap-xs">
               Designing a flow for:{" "}
               <span className="font-bold text-secondary">
-                {selectedAssignment?.name || "Choose an assignment after syncing Canvas"}
+                {sessionMode === "custom"
+                  ? customTitle || "Custom focus"
+                  : selectedAssignment?.name || "Choose an assignment after syncing Canvas"}
               </span>
             </p>
           </div>
           <div className="bg-tertiary-container px-md py-sm rounded-lg flex items-center gap-sm self-start md:self-auto">
             <span className="material-symbols-outlined text-on-tertiary-container">auto_awesome</span>
             <p className="font-label-md text-on-tertiary-container italic">
-              {selectedAssignment ? `${estimateEffort(selectedAssignment)} estimated effort` : "Canvas context powers this."}
+              {sessionMode === "custom"
+                ? "Manual files and notes can power this."
+                : selectedAssignment
+                  ? `${estimateEffort(selectedAssignment)} estimated effort`
+                  : "Canvas context powers this."}
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-12 gap-gutter">
           <div className="col-span-12 lg:col-span-5 space-y-gutter">
+            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim rotate-1">
+              <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">route</span>
+                <h3 className="font-headline-md text-headline-md">Session source</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-sm">
+                {[
+                  ["canvas", "Canvas task", "assignment"],
+                  ["custom", "Custom focus", "edit_note"],
+                ].map(([value, label, icon]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`p-sm border-2 rounded-lg font-bold transition-all flex items-center justify-center gap-xs ${
+                      sessionMode === value
+                        ? "border-primary bg-primary-container hover-squish"
+                        : "border-surface-variant bg-white hover:border-primary"
+                    }`}
+                    onClick={() => {
+                      setSessionMode(value as SessionMode);
+                      setSelectedSessionId(null);
+                      setSessionTitle(null);
+                      if (value === "custom") onSelectAssignment(null);
+                    }}
+                  >
+                    <span className="material-symbols-outlined text-sm">{icon}</span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
+                Canvas tasks use synced rubrics, files, and due dates. Custom focus uses your notes and uploaded material.
+              </p>
+            </div>
+
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">fact_check</span>
@@ -264,10 +345,10 @@ export default function StudySessionsView({
                 onChange={(event) => selectSession(event.target.value)}
                 className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
               >
-                <option value="">Draft from selected assignment</option>
+                <option value="">Draft from current setup</option>
                 {sessions.map((session) => (
                   <option key={session.id} value={session.id}>
-                    {session.assignment?.course?.courseCode || session.assignment?.course?.name || "Session"}: {session.title}
+                    {session.assignment?.course?.courseCode || session.assignment?.course?.name || "Custom"}: {session.title}
                   </option>
                 ))}
               </select>
@@ -295,7 +376,8 @@ export default function StudySessionsView({
               )}
             </div>
 
-            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+            {sessionMode === "canvas" ? (
+              <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">assignment</span>
                 <h3 className="font-headline-md text-headline-md">Assignment</h3>
@@ -342,7 +424,36 @@ export default function StudySessionsView({
                     : "Mark done elsewhere"}
                 </button>
               ) : null}
-            </div>
+              </div>
+            ) : (
+              <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+                <div className="flex items-center gap-sm mb-md">
+                  <span className="material-symbols-outlined text-primary">edit_note</span>
+                  <h3 className="font-headline-md text-headline-md">Custom focus</h3>
+                </div>
+                <label className="block mb-sm">
+                  <span className="font-label-md text-label-md text-on-surface-variant">Focus title</span>
+                  <input
+                    value={customTitle}
+                    onChange={(event) => setCustomTitle(event.target.value)}
+                    placeholder="Example: Finish cyber security report outline"
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="block">
+                  <span className="font-label-md text-label-md text-on-surface-variant">What do you want to work on?</span>
+                  <textarea
+                    value={customFocus}
+                    onChange={(event) => setCustomFocus(event.target.value)}
+                    placeholder="Paste the brief, describe the task, add what is confusing, or list the outcome you want by the end."
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-32 resize-y"
+                  />
+                </label>
+                <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
+                  Upload slides or notes below, then generate a plan. The timer waits until you decide the plan is right.
+                </p>
+              </div>
+            )}
 
             <div className="sticky-note bg-primary-container/25 p-md rounded-lg border-2 border-primary-fixed-dim rotate-1">
               <div className="flex items-center gap-sm mb-md">
@@ -356,28 +467,29 @@ export default function StudySessionsView({
                 type="file"
                 className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-label-md text-label-md"
                 onChange={(event) => setSessionUploadFile(event.target.files?.[0] || null)}
-                disabled={!selectedAssignment}
               />
               <textarea
                 value={sessionUploadNotes}
                 onChange={(event) => setSessionUploadNotes(event.target.value)}
                 placeholder="Paste brief/rubric/lecture slide highlights if the file is a PDF, image, or PowerPoint..."
                 className="mt-sm w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
-                disabled={!selectedAssignment}
               />
               <button
                 type="button"
                 className="mt-sm bubbly-button w-full bg-secondary text-on-secondary font-bold py-sm rounded-lg flex items-center justify-center gap-sm disabled:opacity-60"
                 onClick={uploadSessionMaterial}
                 disabled={
-                  !selectedAssignment ||
                   !actions.onUploadMaterial ||
                   isUploadingMaterial ||
                   (!sessionUploadFile && !sessionUploadNotes.trim())
                 }
               >
                 <span className="material-symbols-outlined">library_add</span>
-                {isUploadingMaterial ? "Adding material..." : "Add to this assignment"}
+                {isUploadingMaterial
+                  ? "Adding material..."
+                  : sessionMode === "custom"
+                    ? "Add to custom focus"
+                    : "Add to this assignment"}
               </button>
             </div>
 
@@ -401,6 +513,19 @@ export default function StudySessionsView({
                   </button>
                 ))}
               </div>
+              <label className="block mt-sm">
+                <span className="font-label-md text-label-md text-on-surface-variant">Custom minutes</span>
+                <input
+                  type="number"
+                  min={15}
+                  max={480}
+                  value={duration}
+                  onChange={(event) =>
+                    setDuration(Math.max(15, Math.min(480, Number(event.target.value) || 15)))
+                  }
+                  className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                />
+              </label>
             </div>
 
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
@@ -474,10 +599,14 @@ export default function StudySessionsView({
                 type="button"
                 className="mt-md bubbly-button w-full bg-primary text-on-primary font-bold py-md rounded-lg flex items-center justify-center gap-sm shadow-lg disabled:opacity-60"
                 onClick={generateSession}
-                disabled={isCreatingSession || !selectedAssignment}
+                disabled={isCreatingSession || (sessionMode === "canvas" && !selectedAssignment)}
               >
                 <span className="material-symbols-outlined">auto_awesome</span>
-                {isCreatingSession ? "Generating..." : "Generate Canvas-specific plan"}
+                {isCreatingSession
+                  ? "Generating..."
+                  : sessionMode === "custom"
+                    ? "Generate custom focus plan"
+                    : "Generate Canvas-specific plan"}
               </button>
             </div>
           </div>
@@ -583,6 +712,25 @@ export default function StudySessionsView({
                   }}
                 >
                   <span className="material-symbols-outlined">restart_alt</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm w-full mt-sm">
+                <button
+                  type="button"
+                  className="bubbly-button bg-white text-primary border-2 border-primary-fixed-dim font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
+                  onClick={generateSession}
+                  disabled={isCreatingSession || (sessionMode === "canvas" && !selectedAssignment)}
+                >
+                  <span className="material-symbols-outlined">refresh</span>
+                  Not happy? Regenerate
+                </button>
+                <button
+                  type="button"
+                  className="bubbly-button bg-white text-secondary border-2 border-secondary-fixed-dim font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
+                  onClick={askAboutSession}
+                >
+                  <span className="material-symbols-outlined">chat</span>
+                  Ask about this session
                 </button>
               </div>
             </div>

@@ -3,16 +3,25 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import ViewHeader from "../components/ViewHeader";
-import type { DashboardSummary, StudySidekickActions } from "../types";
+import type { DashboardScopeSummary, DashboardSummary, StudySidekickActions } from "../types";
 
 type SettingsViewProps = {
   dashboard: DashboardSummary;
+  scope: DashboardScopeSummary;
   actions: StudySidekickActions;
   onConnectCanvas: (canvasBaseUrl: string, accessToken: string) => Promise<void>;
+  onResetDashboardScope: () => Promise<void>;
   onLogout: () => void;
 };
 
-export default function SettingsView({ dashboard, actions, onConnectCanvas, onLogout }: SettingsViewProps) {
+export default function SettingsView({
+  dashboard,
+  scope,
+  actions,
+  onConnectCanvas,
+  onResetDashboardScope,
+  onLogout,
+}: SettingsViewProps) {
   const [search, setSearch] = useState("");
   const [canvasBaseUrl, setCanvasBaseUrl] = useState("https://rmit.instructure.com");
   const [accessToken, setAccessToken] = useState("");
@@ -143,6 +152,49 @@ export default function SettingsView({ dashboard, actions, onConnectCanvas, onLo
                 <li>Canvas content is treated as untrusted data.</li>
                 <li>All API calls are scoped to your signed-in user.</li>
               </ul>
+            </div>
+
+            <div className="bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md -rotate-1">
+              <div className="flex items-center gap-sm mb-sm">
+                <span className="material-symbols-outlined text-primary">tune</span>
+                <h3 className="font-headline-md text-headline-md text-primary">Dashboard scope</h3>
+              </div>
+              <p className="font-body-md text-on-surface-variant">
+                Hidden items are removed from dashboard views and skipped by future Canvas syncs.
+              </p>
+              <div className="grid grid-cols-2 gap-sm my-md">
+                <div className="bg-white border-2 border-surface-variant rounded-lg p-sm text-center">
+                  <p className="font-display-sm text-display-sm text-primary">{scope.hiddenCourses.length}</p>
+                  <p className="font-label-sm text-label-sm text-on-surface-variant">Courses hidden</p>
+                </div>
+                <div className="bg-white border-2 border-surface-variant rounded-lg p-sm text-center">
+                  <p className="font-display-sm text-display-sm text-primary">{scope.hiddenAssignments.length}</p>
+                  <p className="font-label-sm text-label-sm text-on-surface-variant">Tasks hidden</p>
+                </div>
+              </div>
+              {scope.hiddenCourses.length || scope.hiddenAssignments.length ? (
+                <div className="max-h-36 overflow-auto space-y-xs mb-md pr-xs">
+                  {scope.hiddenCourses.slice(0, 4).map((course) => (
+                    <p key={course.id} className="font-label-sm text-label-sm text-on-surface-variant line-clamp-1">
+                      Course: {course.courseCode ? `${course.courseCode} - ` : ""}
+                      {course.name}
+                    </p>
+                  ))}
+                  {scope.hiddenAssignments.slice(0, 4).map((assignment) => (
+                    <p key={assignment.id} className="font-label-sm text-label-sm text-on-surface-variant line-clamp-1">
+                      Task: {assignment.courseCode || assignment.courseName} - {assignment.name}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
+                onClick={onResetDashboardScope}
+                disabled={!scope.hiddenCourses.length && !scope.hiddenAssignments.length}
+              >
+                Show everything again
+              </button>
             </div>
 
             <button

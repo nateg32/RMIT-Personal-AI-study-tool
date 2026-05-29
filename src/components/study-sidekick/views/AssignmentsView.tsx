@@ -12,6 +12,7 @@ type AssignmentsViewProps = {
   onCreateSession: (assignmentId: string) => void;
   onSelectAssignment: (assignmentId: string) => void;
   onUpdateAssignmentStatus: (assignmentId: string, status: "open" | "submitted_elsewhere") => Promise<void>;
+  onHideAssignment: (assignmentId: string) => void;
   isCreatingSession: boolean;
 };
 
@@ -28,6 +29,7 @@ export default function AssignmentsView({
   onCreateSession,
   onSelectAssignment,
   onUpdateAssignmentStatus,
+  onHideAssignment,
   isCreatingSession,
 }: AssignmentsViewProps) {
   const [search, setSearch] = useState("");
@@ -217,6 +219,15 @@ export default function AssignmentsView({
                     <span className="material-symbols-outlined">
                       {isSubmitted(assignment) ? "undo" : "task_alt"}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
+                    onClick={() => onHideAssignment(assignment.id)}
+                    aria-label="Remove from dashboard"
+                    title="Remove from dashboard and future syncs"
+                  >
+                    <span className="material-symbols-outlined">delete</span>
                   </button>
                   <button
                     type="button"

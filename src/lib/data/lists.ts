@@ -6,6 +6,12 @@ import { isDemoUser } from "@/lib/auth";
 import type { CanvasAssignmentSummary } from "@/lib/types";
 import { sortByPriority, withPrioritySignals } from "@/lib/prioritization";
 import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
+import {
+  filterManualMaterials,
+  getDashboardPreferences,
+  isAssignmentVisible,
+  isCourseVisible,
+} from "@/lib/data/preferences";
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
@@ -20,33 +26,36 @@ export async function getAssignmentsForUser(user: User): Promise<CanvasAssignmen
     return [...demoDashboard.dueToday, ...demoDashboard.dueThisWeek];
   }
   const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
   const assignments = await db.assignment.findMany({
     where: { userId: user.id },
     include: { course: true, submission: true },
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
   });
   return sortByPriority(
-    assignments.map((assignment) =>
-      withPrioritySignals({
-        id: assignment.id,
-        courseId: assignment.courseId,
-        canvasAssignmentId: assignment.canvasAssignmentId,
-        courseName: assignment.course.name,
-        courseCode: assignment.course.courseCode,
-        name: assignment.name,
-        dueAt: assignment.dueAt,
-        pointsPossible: assignment.pointsPossible,
-        htmlUrl: assignment.htmlUrl,
-        description: assignment.description,
-        rubricSummary: assignment.rubricSummary,
-        rubric: assignment.rubric,
-        submissionTypes: stringArray(assignment.submissionTypes),
-        submittedAt: assignment.submission?.submittedAt,
-        workflowState: assignment.submission?.workflowState,
-        missing: assignment.submission?.missing,
-        late: assignment.submission?.late,
-      }),
-    ),
+    assignments
+      .filter((assignment) => isAssignmentVisible(assignment, preferences))
+      .map((assignment) =>
+        withPrioritySignals({
+          id: assignment.id,
+          courseId: assignment.courseId,
+          canvasAssignmentId: assignment.canvasAssignmentId,
+          courseName: assignment.course.name,
+          courseCode: assignment.course.courseCode,
+          name: assignment.name,
+          dueAt: assignment.dueAt,
+          pointsPossible: assignment.pointsPossible,
+          htmlUrl: assignment.htmlUrl,
+          description: assignment.description,
+          rubricSummary: assignment.rubricSummary,
+          rubric: assignment.rubric,
+          submissionTypes: stringArray(assignment.submissionTypes),
+          submittedAt: assignment.submission?.submittedAt,
+          workflowState: assignment.submission?.workflowState,
+          missing: assignment.submission?.missing,
+          late: assignment.submission?.late,
+        }),
+      ),
   );
 }
 
@@ -60,17 +69,22 @@ export async function getCoursesForUser(user: User) {
     ];
   }
   const db = getDb();
-  return db.course.findMany({
+  const preferences = await getDashboardPreferences(user.id);
+  const courses = await db.course.findMany({
     where: { userId: user.id },
     orderBy: [{ active: "desc" }, { name: "asc" }],
   });
+  return courses.filter((course) => isCourseVisible(course, preferences));
 }
 
 export async function getAnnouncementsForUser(user: User) {
   if (isDemoUser(user) || !env.DATABASE_URL) return demoDashboard.announcements;
   const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const courses = await db.course.findMany({ where: { userId: user.id }, select: { id: true, canvasCourseId: true } });
+  const visibleCourseIds = courses.filter((course) => isCourseVisible(course, preferences)).map((course) => course.id);
   const announcements = await db.announcement.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, courseId: { in: visibleCourseIds } },
     include: { course: true },
     orderBy: [{ postedAt: "desc" }, { createdAt: "desc" }],
     take: 50,
@@ -88,9 +102,12 @@ export async function getAnnouncementsForUser(user: User) {
 export async function getFilesForUser(user: User) {
   if (isDemoUser(user) || !env.DATABASE_URL) return demoDashboard.files;
   const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const courses = await db.course.findMany({ where: { userId: user.id }, select: { id: true, canvasCourseId: true } });
+  const visibleCourseIds = courses.filter((course) => isCourseVisible(course, preferences)).map((course) => course.id);
   const [canvasFiles, uploadedSnapshots] = await Promise.all([
     db.canvasFile.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
       include: { course: true },
       orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
       take: 120,
@@ -104,9 +121,10 @@ export async function getFilesForUser(user: User) {
   const uploadedFiles = uploadedSnapshots
     .map((snapshot) => parseManualMaterial(snapshot.metadata))
     .filter((file): file is ManualMaterialMetadata => Boolean(file));
+  const visibleUploadedFiles = filterManualMaterials(uploadedFiles, preferences);
 
   return [
-    ...uploadedFiles.map((file) => ({
+    ...visibleUploadedFiles.map((file) => ({
       id: file.id,
       courseId: file.courseId,
       assignmentId: file.assignmentId,

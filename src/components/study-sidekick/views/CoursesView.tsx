@@ -12,6 +12,7 @@ type CoursesViewProps = {
   actions: StudySidekickActions;
   onCourseFiles: () => void;
   onCourseTasks: () => void;
+  onHideCourse: (courseId: string) => void;
 };
 
 export default function CoursesView({
@@ -21,6 +22,7 @@ export default function CoursesView({
   actions,
   onCourseFiles,
   onCourseTasks,
+  onHideCourse,
 }: CoursesViewProps) {
   const [search, setSearch] = useState("");
   const visibleCourses = useMemo(() => {
@@ -154,6 +156,15 @@ export default function CoursesView({
                   >
                     <span className="material-symbols-outlined text-sm">assignment</span> Tasks
                   </button>
+                  <button
+                    type="button"
+                    className="w-11 flex items-center justify-center bg-white/70 border-2 border-current/20 py-sm rounded-full font-label-md text-label-md hover:bg-white transition-all"
+                    onClick={() => onHideCourse(course.id)}
+                    aria-label="Remove course from dashboard"
+                    title="Remove from dashboard and future syncs"
+                  >
+                    <span className="material-symbols-outlined text-sm">delete</span>
+                  </button>
                 </div>
               </div>
             </article>
@@ -165,8 +176,10 @@ export default function CoursesView({
             <div className="w-16 h-16 bg-surface-container rounded-full flex items-center justify-center mb-md">
               <span className="material-symbols-outlined text-[40px] text-on-surface-variant">cloud_sync</span>
             </div>
-            <h3 className="font-headline-md text-headline-md text-on-surface-variant">No courses synced yet</h3>
-            <p className="font-body-md text-on-surface-variant mt-sm px-lg">Connect Canvas and run Sync Canvas.</p>
+            <h3 className="font-headline-md text-headline-md text-on-surface-variant">No courses shown</h3>
+            <p className="font-body-md text-on-surface-variant mt-sm px-lg">
+              Sync Canvas or reset your dashboard scope in Settings.
+            </p>
           </div>
         ) : null}
       </div>

@@ -17,6 +17,7 @@ import type {
   CourseSummary,
   CreateStudySessionInput,
   DailyBrief,
+  DashboardScopeSummary,
   DashboardSummary,
   FileSummary,
   StudyPlan,
@@ -87,6 +88,15 @@ const emptyDashboard: DashboardSummary = {
   riskLevel: "low",
 };
 
+const emptyScope: DashboardScopeSummary = {
+  excludedCourseIds: [],
+  excludedCanvasCourseIds: [],
+  excludedAssignmentIds: [],
+  excludedCanvasAssignmentKeys: [],
+  hiddenCourses: [],
+  hiddenAssignments: [],
+};
+
 const CHAT_STORAGE_KEY = "study-sidekick-chat-v1";
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -132,6 +142,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [files, setFiles] = useState<FileSummary[]>([]);
   const [studySessions, setStudySessions] = useState<StudySessionRecord[]>([]);
   const [dailyBrief, setDailyBrief] = useState<DailyBrief | null>(null);
+  const [dashboardScope, setDashboardScope] = useState<DashboardScopeSummary>(emptyScope);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -156,7 +167,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   }, []);
 
   const refreshData = useCallback(async () => {
-    const [dashboardData, assignmentData, courseData, announcementData, fileData, sessionData, briefData] =
+    const [dashboardData, assignmentData, courseData, announcementData, fileData, sessionData, briefData, scopeData] =
       await Promise.all([
         apiJson<DashboardSummary>("/api/dashboard"),
         apiJson<AssignmentSummary[]>("/api/assignments"),
@@ -165,6 +176,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         apiJson<FileSummary[]>("/api/files"),
         apiJson<StudySessionRecord[]>("/api/study-sessions"),
         apiJson<{ brief: DailyBrief | null }>("/api/daily-brief"),
+        apiJson<DashboardScopeSummary>("/api/preferences"),
       ]);
 
     setDashboard(dashboardData);
@@ -174,6 +186,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     setFiles(fileData);
     setStudySessions(sessionData);
     setDailyBrief(briefData.brief);
+    setDashboardScope(scopeData);
     setSelectedAssignmentId((current) => current || assignmentData[0]?.id || null);
   }, []);
 
@@ -240,13 +253,39 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           body: JSON.stringify(input),
         });
         await refreshData();
-        setSelectedAssignmentId(input.assignmentId);
+        setSelectedAssignmentId(input.assignmentId || null);
         setActiveView("sessions");
-        setActionMessage("Study session created from assignment details, rubric, files, and recent course context.");
+        setActionMessage(
+          input.assignmentId
+            ? "Study session created from assignment details, rubric, files, and recent course context."
+            : "Custom focus plan created. Review the blocks, tweak anything you want, then start the timer when it feels right.",
+        );
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Study session creation failed.");
       } finally {
         setIsCreatingSession(false);
+      }
+    },
+    [refreshData],
+  );
+
+  const updateDashboardScope = useCallback(
+    async (body: { action: "hide_course"; courseId: string } | { action: "hide_assignment"; assignmentId: string } | { action: "reset" }) => {
+      setActionMessage("Updating what appears on your dashboard...");
+      try {
+        const updated = await apiJson<DashboardScopeSummary>("/api/preferences", {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+        setDashboardScope(updated);
+        await refreshData();
+        setActionMessage(
+          body.action === "reset"
+            ? "Dashboard scope reset. The next sync will include all visible Canvas courses and assignments again."
+            : "Removed from your dashboard scope. Future Canvas syncs will skip it unless you reset the scope.",
+        );
+      } catch (error) {
+        setActionMessage(error instanceof Error ? error.message : "Could not update dashboard scope.");
       }
     },
     [refreshData],
@@ -521,6 +560,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                   setActiveView("sessions");
                 }}
                 onUpdateAssignmentStatus={updateAssignmentStatus}
+                onHideAssignment={(assignmentId) => updateDashboardScope({ action: "hide_assignment", assignmentId })}
                 isCreatingSession={isCreatingSession}
               />
             )}
@@ -532,6 +572,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 actions={actions}
                 onCourseFiles={() => setActiveView("files")}
                 onCourseTasks={() => setActiveView("assignments")}
+                onHideCourse={(courseId) => updateDashboardScope({ action: "hide_course", courseId })}
               />
             )}
             {activeView === "announcements" && (
@@ -566,8 +607,10 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             {activeView === "settings" && (
               <SettingsView
                 dashboard={dashboard}
+                scope={dashboardScope}
                 actions={actions}
                 onConnectCanvas={connectCanvas}
+                onResetDashboardScope={() => updateDashboardScope({ action: "reset" })}
                 onLogout={logOut}
               />
             )}

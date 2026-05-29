@@ -7,6 +7,11 @@ import { demoDashboard } from "@/lib/mock-data";
 import { getUrgency, withPrioritySignals } from "@/lib/prioritization";
 import type { AssignmentContextPack, AssignmentContextResource, CanvasAssignmentSummary } from "@/lib/types";
 import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
+import {
+  filterManualMaterials,
+  getDashboardPreferences,
+  isAssignmentVisible,
+} from "@/lib/data/preferences";
 
 const RESOURCE_KEYWORDS = [
   "assignment",
@@ -135,11 +140,13 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
 
   const db = getDb();
   const connection = await db.canvasConnection.findUnique({ where: { userId: user.id } });
+  const preferences = await getDashboardPreferences(user.id);
   const assignment = await db.assignment.findFirst({
     where: { id: assignmentId, userId: user.id },
     include: { course: true, submission: true },
   });
   if (!assignment) return null;
+  if (!isAssignmentVisible(assignment, preferences)) return null;
 
   const queryWords = words(`${assignment.name} ${assignment.description || ""} ${assignment.course.name}`);
   const files = await db.canvasFile.findMany({
@@ -294,6 +301,7 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
   }
 
   const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
   const [assignments, uploadedSnapshots] = await Promise.all([
     db.assignment.findMany({
       where: { userId: user.id },
@@ -311,11 +319,13 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
   const uploadedFiles = uploadedSnapshots
     .map((snapshot) => parseManualMaterial(snapshot.metadata))
     .filter((file): file is ManualMaterialMetadata => Boolean(file));
+  const visibleUploadedFiles = filterManualMaterials(uploadedFiles, preferences);
 
   const messageWords = words(message);
   const ranked = assignments
+    .filter((assignment) => isAssignmentVisible(assignment, preferences))
     .map((assignment) => {
-      const matchingUploads = uploadedFiles
+      const matchingUploads = visibleUploadedFiles
         .filter(
           (file) =>
             file.assignmentId === assignment.id ||
@@ -354,4 +364,85 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
 
   const contexts = await Promise.all(ranked.map((item) => getAssignmentContextForUser(user, item.id)));
   return contexts.filter((context): context is AssignmentContextPack => Boolean(context));
+}
+
+export async function getCustomFocusContextForUser(
+  user: User,
+  input: { title?: string | null; focus?: string | null },
+): Promise<AssignmentContextPack> {
+  const title = (input.title || "Custom focus session").trim().slice(0, 160) || "Custom focus session";
+  const focus = (input.focus || "A manually created study focus. Use uploaded notes and files where available.").trim();
+
+  if (isDemoUser(user) || !env.DATABASE_URL) {
+    return {
+      assignment: {
+        id: "custom-focus",
+        canvasAssignmentId: 0,
+        courseName: "Custom focus",
+        name: title,
+        description: focus,
+        workflowState: "custom",
+      },
+      lastSyncAt: demoDashboard.lastSyncAt,
+      stale: demoDashboard.stale,
+      course: { id: "custom", name: "Custom focus" },
+      rubricCriteria: [],
+      relatedFiles: demoDashboard.files.slice(0, 5).map((file) => ({
+        title: file.name,
+        type: file.source === "manual_upload" ? "Manual upload" : "File",
+        moduleName: file.courseName,
+        url: file.url,
+        excerpt: file.excerpt,
+      })),
+      relatedResources: [],
+      recentAnnouncements: [],
+      contextConfidence: "medium",
+      missingContext: ["This is a custom focus, so Canvas due dates and rubrics may not apply."],
+    };
+  }
+
+  const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const [connection, uploadedSnapshots] = await Promise.all([
+    db.canvasConnection.findUnique({ where: { userId: user.id } }),
+    db.syncSnapshot.findMany({
+      where: { userId: user.id, type: "manual_upload" },
+      orderBy: [{ createdAt: "desc" }],
+      take: 30,
+    }),
+  ]);
+  const uploadedFiles = filterManualMaterials(
+    uploadedSnapshots
+      .map((snapshot) => parseManualMaterial(snapshot.metadata))
+      .filter((file): file is ManualMaterialMetadata => Boolean(file)),
+    preferences,
+  );
+
+  return {
+    assignment: {
+      id: "custom-focus",
+      canvasAssignmentId: 0,
+      courseName: "Custom focus",
+      name: title,
+      description: focus,
+      workflowState: "custom",
+    },
+    lastSyncAt: connection?.lastSyncAt?.toISOString() || null,
+    stale: !connection?.lastSyncAt || connection.lastSyncAt < subHours(new Date(), 12),
+    course: { id: "custom", name: "Custom focus" },
+    rubricCriteria: [],
+    relatedFiles: uploadedFiles.slice(0, 12).map((file) => ({
+      title: file.name,
+      type: "Manual upload",
+      moduleName: file.assignmentName || file.courseName || "Manual library",
+      url: null,
+      excerpt: excerpt([file.notes, file.extractedText].filter(Boolean).join("\n\n")),
+    })),
+    relatedResources: [],
+    recentAnnouncements: [],
+    contextConfidence: focus || uploadedFiles.length ? "medium" : "low",
+    missingContext: uploadedFiles.length
+      ? ["This is a custom focus, so Canvas due dates and rubrics may not apply."]
+      : ["No uploaded materials were attached yet. Add files or notes for a more specific plan."],
+  };
 }

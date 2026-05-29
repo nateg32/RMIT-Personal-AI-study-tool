@@ -42,6 +42,7 @@ export type AssignmentSummary = {
 
 export type CourseSummary = {
   id: string;
+  canvasCourseId?: number;
   name: string;
   courseCode?: string | null;
   term?: string | null;
@@ -185,11 +186,28 @@ export type DashboardSummary = {
 };
 
 export type CreateStudySessionInput = {
-  assignmentId: string;
+  assignmentId?: string | null;
+  customTitle?: string;
+  customFocus?: string;
   durationMinutes: number;
   mode: string;
   energyLevel: string;
   targetOutcome: string;
+};
+
+export type DashboardScopeSummary = {
+  excludedCourseIds: string[];
+  excludedCanvasCourseIds: number[];
+  excludedAssignmentIds: string[];
+  excludedCanvasAssignmentKeys: string[];
+  hiddenCourses: Array<{ id: string; canvasCourseId: number; name: string; courseCode?: string | null }>;
+  hiddenAssignments: Array<{
+    id: string;
+    canvasAssignmentId: number;
+    name: string;
+    courseName: string;
+    courseCode?: string | null;
+  }>;
 };
 
 export type StudySidekickActions = {

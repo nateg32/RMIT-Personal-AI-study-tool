@@ -6,6 +6,11 @@ import { env, requireEnv } from "@/lib/env";
 import { decryptSecret } from "@/lib/security/crypto";
 import { stripCanvasHtml } from "@/lib/security/html";
 import { normaliseBaseUrl } from "@/lib/utils";
+import {
+  getDashboardPreferences,
+  isCanvasAssignmentVisible,
+  isCourseVisible,
+} from "@/lib/data/preferences";
 
 type ChangeEvent = {
   type: string;
@@ -139,6 +144,7 @@ export async function syncCanvasForUser(user: User) {
   const now = new Date();
   const startDate = new Date(now.getTime() - 365 * 24 * 36e5);
   const endDate = new Date(now.getTime() + 90 * 24 * 36e5);
+  const preferences = await getDashboardPreferences(user.id);
 
   await db.canvasConnection.updateMany({
     where: { userId: user.id },
@@ -150,6 +156,7 @@ export async function syncCanvasForUser(user: User) {
     const courses = await client.getCourses();
     const activeCourses = courses.filter((course) => course.workflow_state !== "deleted");
     const courseIdMap = new Map<number, string>();
+    const visibleCanvasCourseIds = new Set<number>();
     const seenAnnouncements = new Set<string>();
 
     for (const course of activeCourses) {
@@ -171,6 +178,9 @@ export async function syncCanvasForUser(user: User) {
         },
       });
       courseIdMap.set(course.id, savedCourse.id);
+      if (isCourseVisible(savedCourse, preferences)) {
+        visibleCanvasCourseIds.add(course.id);
+      }
     }
 
     const saveAnnouncement = async (announcement: CanvasAnnouncement, fallbackCourseId?: number) => {
@@ -215,11 +225,13 @@ export async function syncCanvasForUser(user: User) {
     };
 
     for (const course of activeCourses) {
+      if (!visibleCanvasCourseIds.has(course.id)) continue;
       const courseId = courseIdMap.get(course.id);
       if (!courseId) continue;
       const assignments = await client.getAssignmentsWithSubmissions(course.id);
 
       for (const assignment of assignments) {
+        if (!isCanvasAssignmentVisible(course.id, assignment.id, preferences)) continue;
         const assignmentDetails = await client
           .getAssignmentDetails(course.id, assignment.id)
           .catch(() => assignment);
@@ -413,7 +425,7 @@ export async function syncCanvasForUser(user: User) {
     }
 
     const announcements = await client.getRecentAnnouncements(
-      activeCourses.map((course) => course.id),
+      activeCourses.filter((course) => visibleCanvasCourseIds.has(course.id)).map((course) => course.id),
       startDate,
       endDate,
     ).catch(() => []);
@@ -423,6 +435,7 @@ export async function syncCanvasForUser(user: User) {
     }
 
     for (const course of activeCourses) {
+      if (!visibleCanvasCourseIds.has(course.id)) continue;
       const courseAnnouncements = await client.getCourseAnnouncements(course.id).catch(() => []);
       for (const announcement of courseAnnouncements) {
         await saveAnnouncement(announcement, course.id);
@@ -444,7 +457,8 @@ export async function syncCanvasForUser(user: User) {
 
     return {
       ok: true,
-      courses: activeCourses.length,
+      courses: visibleCanvasCourseIds.size,
+      skippedCourses: activeCourses.length - visibleCanvasCourseIds.size,
       changes,
       syncedAt: new Date().toISOString(),
     };

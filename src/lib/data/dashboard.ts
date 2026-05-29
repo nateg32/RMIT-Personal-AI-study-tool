@@ -7,6 +7,12 @@ import { getOverallRisk, isSubmitted, sortByPriority, withPrioritySignals } from
 import type { CanvasAssignmentSummary, DashboardSummary } from "@/lib/types";
 import { isDemoUser } from "@/lib/auth";
 import { parseManualMaterial, type ManualMaterialMetadata } from "@/lib/data/uploads";
+import {
+  filterManualMaterials,
+  getDashboardPreferences,
+  isAssignmentVisible,
+  isCourseVisible,
+} from "@/lib/data/preferences";
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
@@ -80,14 +86,19 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     where: { userId: user.id },
     orderBy: [{ active: "desc" }, { name: "asc" }],
   });
+  const preferences = await getDashboardPreferences(user.id);
+  const visibleCourses = courses.filter((course) => isCourseVisible(course, preferences));
+  const visibleCourseIds = visibleCourses.map((course) => course.id);
 
   const assignments = await db.assignment.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, courseId: { in: visibleCourseIds } },
     include: { course: true, submission: true },
     orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
   });
 
-  const summaries = assignments.map((assignment) => withPrioritySignals(assignmentSummary(assignment), now));
+  const summaries = assignments
+    .filter((assignment) => isAssignmentVisible(assignment, preferences))
+    .map((assignment) => withPrioritySignals(assignmentSummary(assignment), now));
   const unsubmitted = sortByPriority(
     summaries.filter((item) => !isSubmitted(item)),
   );
@@ -103,21 +114,21 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   });
 
   const announcements = await db.announcement.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, courseId: { in: visibleCourseIds } },
     include: { course: true },
     orderBy: [{ postedAt: "desc" }, { createdAt: "desc" }],
     take: 8,
   });
 
   const allRecentAnnouncements = await db.announcement.findMany({
-    where: { userId: user.id, postedAt: { gte: subHours(now, 24 * 14) } },
+    where: { userId: user.id, courseId: { in: visibleCourseIds }, postedAt: { gte: subHours(now, 24 * 14) } },
     select: { courseId: true },
     take: 200,
   });
 
   const [files, uploadedSnapshots] = await Promise.all([
     db.canvasFile.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
       include: { course: true },
       orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
       take: 8,
@@ -134,7 +145,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
 
   const [allRecentFiles, allRecentUploads] = await Promise.all([
     db.canvasFile.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, courseId: { in: visibleCourseIds } },
       select: { courseId: true, updatedAtCanvas: true, createdAt: true },
       orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
       take: 200,
@@ -149,10 +160,12 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const recentUploadMaterials = allRecentUploads
     .map((snapshot) => parseManualMaterial(snapshot.metadata))
     .filter((file): file is ManualMaterialMetadata => Boolean(file));
+  const visibleUploadedFiles = filterManualMaterials(uploadedFiles, preferences);
+  const visibleRecentUploadMaterials = filterManualMaterials(recentUploadMaterials, preferences);
 
   const stale = !lastSyncAt || lastSyncAt < subHours(now, 12);
   const priority = unsubmitted.slice(0, 6);
-  const courseBreakdown = courses.map((course) => {
+  const courseBreakdown = visibleCourses.map((course) => {
     const courseAssignments = summaries.filter((assignment) => assignment.courseId === course.id);
     const courseUnsubmitted = courseAssignments.filter((assignment) => !isSubmitted(assignment));
     const courseDueToday = courseUnsubmitted.filter((assignment) => assignment.dueStatus === "due_today");
@@ -175,7 +188,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
       recentAnnouncements: allRecentAnnouncements.filter((announcement) => announcement.courseId === course.id).length,
       recentFiles:
         allRecentFiles.filter((file) => file.courseId === course.id).length +
-        recentUploadMaterials.filter((file) => file.courseId === course.id).length,
+        visibleRecentUploadMaterials.filter((file) => file.courseId === course.id).length,
       riskLevel: getOverallRisk(courseUnsubmitted),
       nextAssignment: rankedCourseAssignments[0] || null,
     };
@@ -203,7 +216,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
       htmlUrl: announcement.htmlUrl,
     })),
     files: [
-      ...uploadedFiles.map((file) => ({
+      ...visibleUploadedFiles.map((file) => ({
         id: file.id,
         courseId: file.courseId,
         assignmentId: file.assignmentId,
