@@ -137,6 +137,7 @@ export default function StudySessionsView({
   const [isUploadingMaterial, setIsUploadingMaterial] = useState(false);
   const [showSetupOptions, setShowSetupOptions] = useState(false);
   const [showPlanEditor, setShowPlanEditor] = useState(false);
+  const [focusFullscreen, setFocusFullscreen] = useState(false);
   const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
   const [checklistDraft, setChecklistDraft] = useState("");
 
@@ -189,7 +190,9 @@ export default function StudySessionsView({
   const completedMap = plan.completedTasks || {};
   const checklist = plan.checklist || [];
   const completedCount = checklist.filter((item) => completedMap[item]).length;
-  const progress = totalSeconds ? Math.round(((totalSeconds - secondsLeft) / totalSeconds) * 691) : 0;
+  const progressRatio = totalSeconds ? (totalSeconds - secondsLeft) / totalSeconds : 0;
+  const progress = Math.round(progressRatio * 691);
+  const focusProgress = Math.round(progressRatio * 1131);
   const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
   const checklistText = checklist.join("\n");
 
@@ -356,8 +359,109 @@ export default function StudySessionsView({
     setShowPlanEditor(false);
   };
 
+  const toggleTimer = () => {
+    setTimerState({ ...timer, running: !running });
+  };
+
+  const resetTimer = () => {
+    setTimerState({ key: timerKey, secondsLeft: totalSeconds, running: false });
+  };
+
+  const enterFocusFullscreen = async () => {
+    setFocusFullscreen(true);
+    await document.documentElement.requestFullscreen?.().catch(() => undefined);
+  };
+
+  const exitFocusFullscreen = async () => {
+    setFocusFullscreen(false);
+    if (document.fullscreenElement) {
+      await document.exitFullscreen?.().catch(() => undefined);
+    }
+  };
+
+  useEffect(() => {
+    if (!focusFullscreen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFocusFullscreen(false);
+    };
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) setFocusFullscreen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [focusFullscreen]);
+
   return (
     <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
+      {focusFullscreen ? (
+        <div className="fixed inset-0 z-50 bg-background text-on-surface flex items-center justify-center px-md">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(205,239,184,0.55),transparent_42%)]" />
+          <button
+            type="button"
+            className="absolute right-md top-md z-10 rounded-full border-2 border-primary-fixed-dim bg-white/85 px-md py-xs font-label-md text-label-md text-primary bubbly-button"
+            onClick={exitFocusFullscreen}
+          >
+            Exit
+          </button>
+          <div className="relative z-10 flex w-full max-w-4xl flex-col items-center text-center">
+            <p className="mb-sm font-label-md text-label-md uppercase tracking-widest text-on-surface-variant">
+              {running ? "Focus mode" : "Ready when you are"}
+            </p>
+            <div className="relative mb-lg h-[min(70vw,28rem)] w-[min(70vw,28rem)] max-h-[28rem] max-w-[28rem]">
+              <svg className="h-full w-full -rotate-90">
+                <circle className="text-surface-variant" cx="50%" cy="50%" fill="transparent" r="45%" stroke="currentColor" strokeWidth="14" />
+                <circle
+                  className="text-primary"
+                  cx="50%"
+                  cy="50%"
+                  fill="transparent"
+                  r="45%"
+                  stroke="currentColor"
+                  strokeDasharray="1131"
+                  strokeDashoffset={Math.max(0, 1131 - focusProgress)}
+                  strokeLinecap="round"
+                  strokeWidth="14"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-display-lg text-[clamp(4rem,14vw,9rem)] leading-none text-primary">
+                  {minutesToClock(secondsLeft)}
+                </span>
+                <span className="mt-sm max-w-md px-md font-headline-md text-headline-md text-on-surface">
+                  {activeBlock?.name || "Focus time"}
+                </span>
+              </div>
+            </div>
+            {activeBlock?.tasks?.[0] ? (
+              <p className="mb-lg max-w-2xl rounded-full border-2 border-primary-fixed-dim bg-white/80 px-lg py-sm font-body-lg text-body-lg text-on-surface-variant">
+                {activeBlock.tasks[0]}
+              </p>
+            ) : null}
+            <div className="flex w-full max-w-xl flex-col gap-sm sm:flex-row">
+              <button
+                type="button"
+                className="bubbly-button flex-1 rounded-full bg-primary py-md font-bold text-on-primary shadow-lg"
+                onClick={toggleTimer}
+              >
+                <span className="material-symbols-outlined align-middle">{running ? "pause_circle" : "play_circle"}</span>
+                <span className="ml-xs align-middle">{running ? "Pause" : "Start"}</span>
+              </button>
+              <button
+                type="button"
+                className="bubbly-button rounded-full border-2 border-surface-variant bg-white px-lg py-md font-bold text-on-surface-variant"
+                onClick={resetTimer}
+              >
+                <span className="material-symbols-outlined align-middle">restart_alt</span>
+                <span className="ml-xs align-middle">Reset</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <ViewHeader
         searchPlaceholder="Search sessions..."
         searchValue={search}
@@ -809,7 +913,7 @@ export default function StudySessionsView({
                 <button
                   type="button"
                   className="bubbly-button flex-1 bg-primary text-on-primary font-bold py-md rounded-lg text-lg flex items-center justify-center gap-sm shadow-lg"
-                  onClick={() => setTimerState({ ...timer, running: !running })}
+                  onClick={toggleTimer}
                 >
                   <span className="material-symbols-outlined">{running ? "pause_circle" : "play_circle"}</span>
                   {running ? "Pause Session" : "Start Focused Session"}
@@ -817,11 +921,18 @@ export default function StudySessionsView({
                 <button
                   type="button"
                   className="bubbly-button bg-surface-container text-on-surface-variant border-2 border-surface-variant font-bold px-md rounded-lg"
-                  onClick={() => {
-                    setTimerState({ key: timerKey, secondsLeft: totalSeconds, running: false });
-                  }}
+                  onClick={resetTimer}
                 >
                   <span className="material-symbols-outlined">restart_alt</span>
+                </button>
+                <button
+                  type="button"
+                  className="bubbly-button bg-white text-primary border-2 border-primary-fixed-dim font-bold px-md rounded-lg flex items-center justify-center gap-xs"
+                  onClick={enterFocusFullscreen}
+                  title="Open focus timer fullscreen"
+                >
+                  <span className="material-symbols-outlined">fullscreen</span>
+                  <span className="hidden sm:inline">Focus view</span>
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-sm w-full mt-sm">
