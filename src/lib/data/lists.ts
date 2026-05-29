@@ -4,6 +4,11 @@ import { env } from "@/lib/env";
 import { demoDashboard } from "@/lib/mock-data";
 import { isDemoUser } from "@/lib/auth";
 import type { CanvasAssignmentSummary } from "@/lib/types";
+import { sortByPriority, withPrioritySignals } from "@/lib/prioritization";
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
 
 export async function getAssignmentsForUser(user: User): Promise<CanvasAssignmentSummary[]> {
   if (isDemoUser(user) || !env.DATABASE_URL) {
@@ -15,23 +20,29 @@ export async function getAssignmentsForUser(user: User): Promise<CanvasAssignmen
     include: { course: true, submission: true },
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
   });
-  return assignments.map((assignment) => ({
-    id: assignment.id,
-    canvasAssignmentId: assignment.canvasAssignmentId,
-    courseName: assignment.course.name,
-    courseCode: assignment.course.courseCode,
-    name: assignment.name,
-    dueAt: assignment.dueAt,
-    pointsPossible: assignment.pointsPossible,
-    htmlUrl: assignment.htmlUrl,
-    description: assignment.description,
-    rubricSummary: assignment.rubricSummary,
-    rubric: assignment.rubric,
-    submittedAt: assignment.submission?.submittedAt,
-    workflowState: assignment.submission?.workflowState,
-    missing: assignment.submission?.missing,
-    late: assignment.submission?.late,
-  }));
+  return sortByPriority(
+    assignments.map((assignment) =>
+      withPrioritySignals({
+        id: assignment.id,
+        courseId: assignment.courseId,
+        canvasAssignmentId: assignment.canvasAssignmentId,
+        courseName: assignment.course.name,
+        courseCode: assignment.course.courseCode,
+        name: assignment.name,
+        dueAt: assignment.dueAt,
+        pointsPossible: assignment.pointsPossible,
+        htmlUrl: assignment.htmlUrl,
+        description: assignment.description,
+        rubricSummary: assignment.rubricSummary,
+        rubric: assignment.rubric,
+        submissionTypes: stringArray(assignment.submissionTypes),
+        submittedAt: assignment.submission?.submittedAt,
+        workflowState: assignment.submission?.workflowState,
+        missing: assignment.submission?.missing,
+        late: assignment.submission?.late,
+      }),
+    ),
+  );
 }
 
 export async function getCoursesForUser(user: User) {

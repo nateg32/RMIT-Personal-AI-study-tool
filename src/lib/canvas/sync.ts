@@ -152,9 +152,13 @@ export async function syncCanvasForUser(user: User) {
           due_at: assignmentDetails.due_at,
           updated_at: assignmentDetails.updated_at,
           points_possible: assignmentDetails.points_possible,
+          submission_types: assignmentDetails.submission_types,
           workflow_state: assignmentDetails.submission?.workflow_state,
           submitted_at: assignmentDetails.submission?.submitted_at,
           rubric_summary: rubric.summary,
+          all_dates: assignmentDetails.all_dates,
+          overrides: assignmentDetails.overrides,
+          score_statistics: assignmentDetails.score_statistics,
         };
         const change = await snapshot(
           user.id,

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { AssignmentSummary, CourseSummary, StudySidekickActions } from "../types";
-import { compactText, estimateEffort, formatDate, formatRelative, isSubmitted, riskForAssignment, riskTone, statusLabel } from "../lib/client-utils";
+import { assignmentTypeLabel, compactText, estimateEffort, formatDate, formatRelative, isSubmitted, riskForAssignment, riskTone, statusLabel } from "../lib/client-utils";
 
 type AssignmentsViewProps = {
   assignments: AssignmentSummary[];
@@ -47,6 +47,8 @@ export default function AssignmentsView({
           .includes(query);
       })
       .sort((a, b) => {
+        const priorityDelta = (b.priorityScore || 0) - (a.priorityScore || 0);
+        if (priorityDelta !== 0) return priorityDelta;
         const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
         const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
         return aDue - bDue;
@@ -138,6 +140,9 @@ export default function AssignmentsView({
                   <span className="px-sm py-xs bg-white/60 rounded-full font-label-sm text-label-sm line-clamp-1">
                     {assignment.courseCode || assignment.courseName}
                   </span>
+                  <span className="px-sm py-xs bg-white/50 rounded-full font-label-sm text-label-sm line-clamp-1">
+                    {assignmentTypeLabel(assignment)}
+                  </span>
                   <span
                     className={`font-label-sm text-label-sm px-sm py-xs rounded-full border bg-white/70 ${riskTone(risk)}`}
                   >
@@ -153,6 +158,11 @@ export default function AssignmentsView({
                     <p className="font-label-sm text-label-sm uppercase opacity-70">Rubric signal</p>
                     <p className="font-body-md line-clamp-2">{assignment.rubricSummary}</p>
                   </div>
+                ) : null}
+                {assignment.priorityReason ? (
+                  <p className="font-label-md text-label-md opacity-80 mb-md">
+                    Priority: {assignment.priorityReason}
+                  </p>
                 ) : null}
               </div>
 

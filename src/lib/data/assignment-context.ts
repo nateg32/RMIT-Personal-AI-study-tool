@@ -4,6 +4,7 @@ import { isDemoUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
 import { demoDashboard } from "@/lib/mock-data";
+import { getUrgency, withPrioritySignals } from "@/lib/prioritization";
 import type { AssignmentContextPack, AssignmentContextResource, CanvasAssignmentSummary } from "@/lib/types";
 
 const RESOURCE_KEYWORDS = [
@@ -50,6 +51,10 @@ function criteriaFromRubricSummary(summary: string | null | undefined) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 10);
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 }
 
 function resourceUrl(resource: {
@@ -180,8 +185,9 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
     description?: string | null;
     rubricSummary?: string | null;
     rubric?: unknown;
-  } = {
+  } = withPrioritySignals({
     id: assignment.id,
+    courseId: assignment.courseId,
     canvasAssignmentId: assignment.canvasAssignmentId,
     courseName: assignment.course.name,
     courseCode: assignment.course.courseCode,
@@ -194,9 +200,10 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
     workflowState: assignment.submission?.workflowState,
     missing: assignment.submission?.missing,
     late: assignment.submission?.late,
+    submissionTypes: stringArray(assignment.submissionTypes),
     rubricSummary: assignment.rubricSummary,
     rubric: assignment.rubric,
-  };
+  });
 
   const missingContext = [];
   if (!assignment.description) missingContext.push("Assignment description was not available from Canvas.");
@@ -257,11 +264,26 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
       const text = `${assignment.name} ${assignment.description || ""} ${assignment.course.name} ${
         assignment.course.courseCode || ""
       }`;
-      const submitted = assignment.submission?.submittedAt || assignment.submission?.workflowState === "submitted";
-      const dueBoost = assignment.dueAt && assignment.dueAt > new Date() ? 2 : 0;
+      const summary = withPrioritySignals({
+        id: assignment.id,
+        courseId: assignment.courseId,
+        canvasAssignmentId: assignment.canvasAssignmentId,
+        courseName: assignment.course.name,
+        courseCode: assignment.course.courseCode,
+        name: assignment.name,
+        description: assignment.description,
+        dueAt: assignment.dueAt,
+        pointsPossible: assignment.pointsPossible,
+        htmlUrl: assignment.htmlUrl,
+        submissionTypes: stringArray(assignment.submissionTypes),
+        submittedAt: assignment.submission?.submittedAt,
+        workflowState: assignment.submission?.workflowState,
+        missing: assignment.submission?.missing,
+        late: assignment.submission?.late,
+      });
       return {
         id: assignment.id,
-        score: scoreText(messageWords, text) + dueBoost + (submitted ? 0 : 1),
+        score: scoreText(messageWords, text) + getUrgency(summary).score / 25,
       };
     })
     .sort((a, b) => b.score - a.score)

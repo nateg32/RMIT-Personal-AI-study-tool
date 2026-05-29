@@ -7,7 +7,7 @@ import type {
   StudyPlan,
 } from "@/lib/types";
 import { env } from "@/lib/env";
-import { getUrgency } from "@/lib/prioritization";
+import { getAssignmentType, getUrgency, isSubmitted } from "@/lib/prioritization";
 import { formatDateTime } from "@/lib/utils";
 
 export const studyPlanSchema = z.object({
@@ -214,18 +214,20 @@ export function fallbackDailyBrief(input: {
   name: string;
   dueToday: CanvasAssignmentSummary[];
   dueThisWeek: CanvasAssignmentSummary[];
+  priorityItems?: CanvasAssignmentSummary[];
   announcements: string[];
   files: string[];
 }): DailyBriefJson {
-  const urgent = [...input.dueToday, ...input.dueThisWeek].slice(0, 5);
+  const urgent = (input.priorityItems?.length ? input.priorityItems : [...input.dueToday, ...input.dueThisWeek]).slice(0, 5);
+  const topRisk = urgent[0] ? getUrgency(urgent[0]).label : "low";
   return {
     greeting: `Good morning ${input.name}.`,
     summary:
       urgent.length > 0
-        ? "Today is about reducing academic risk: start with the closest unsubmitted work."
+        ? `Today is about reducing academic risk: start with ${urgent[0].courseName}: ${urgent[0].name}.`
         : "No urgent Canvas deadlines are showing. Use today for review and setup.",
-    riskLevel: input.dueToday.length > 0 ? "critical" : input.dueThisWeek.length > 0 ? "high" : "low",
-    focusItems: urgent.map((assignment) => `${assignment.courseName}: ${assignment.name}`),
+    riskLevel: topRisk,
+    focusItems: urgent.map((assignment) => `${assignment.courseName}: ${assignment.name} (${getUrgency(assignment).reason})`),
     dueToday: input.dueToday.map((assignment) => assignment.name),
     dueThisWeek: input.dueThisWeek.map((assignment) => assignment.name),
     newAnnouncements: input.announcements,
@@ -246,6 +248,7 @@ Never invent assignments, due dates, files, or announcements. Use only this data
 Student: ${input.name}
 Due today: ${JSON.stringify(input.dueToday)}
 Due this week: ${JSON.stringify(input.dueThisWeek)}
+Priority order: ${JSON.stringify(input.priorityItems || [])}
 Announcements: ${JSON.stringify(input.announcements)}
 Files: ${JSON.stringify(input.files)}
 
@@ -279,18 +282,12 @@ export async function chatWithCanvasContext(input: {
     input.assignmentContexts,
   )}`;
 
-  if (!ai) {
-    const first = input.due[0];
-    return first
-      ? `Based on the latest sync, start with ${first.courseName}: ${first.name}. Last sync: ${
-          input.lastSyncAt || "never"
-        }.`
-      : `I do not see urgent synced assignments. Last sync: ${input.lastSyncAt || "never"}.`;
-  }
+  if (!ai) return fallbackChatAnswer(input);
 
-  const response = await ai.models.generateContent({
-    model: env.GEMINI_MODEL,
-    contents: `
+  try {
+    const response = await ai.models.generateContent({
+      model: env.GEMINI_MODEL,
+      contents: `
 You are a Canvas-aware study assistant. Only answer using the facts below.
 Never invent due dates, assignment requirements, rubrics, submission statuses, grades, files, module resources, or announcements.
 If data is stale or missing, say so.
@@ -307,6 +304,78 @@ Question: ${input.message}
 Facts:
 ${facts}
 `,
-  });
-  return response.text || "I could not generate a response.";
+    });
+    return response.text || fallbackChatAnswer(input);
+  } catch {
+    return fallbackChatAnswer(input);
+  }
+}
+
+function assignmentKindLabel(assignment: CanvasAssignmentSummary) {
+  const kind = assignment.assignmentType || getAssignmentType(assignment);
+  if (kind === "quiz") return "quiz";
+  if (kind === "discussion") return "discussion";
+  if (kind === "file_upload") return "file upload";
+  if (kind === "external_tool") return "external tool task";
+  return "assignment";
+}
+
+function assignmentLine(assignment: CanvasAssignmentSummary, timezone = "Australia/Sydney") {
+  const urgency = getUrgency(assignment);
+  const status = isSubmitted(assignment) ? "submitted" : assignment.workflowState || "unsubmitted";
+  return `${assignment.courseName}: ${assignment.name} (${assignmentKindLabel(assignment)}, ${status}, due ${formatDateTime(
+    assignment.dueAt,
+    timezone,
+  )}, ${urgency.reason})`;
+}
+
+function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) {
+  const message = input.message.toLowerCase();
+  const firstContext = input.assignmentContexts[0];
+  const topAssignments = input.due.slice(0, 6);
+  const lastSync = input.lastSyncAt || "never";
+
+  if (firstContext && /(about|rubric|brief|slides|lecture|file|resource|what is|assignment|quiz)/i.test(message)) {
+    const assignment = firstContext.assignment;
+    const rubric = firstContext.rubricCriteria.length
+      ? firstContext.rubricCriteria.slice(0, 4).map((item) => `- ${item}`).join("\n")
+      : "- No rubric criteria were synced for this item.";
+    const resources = [...firstContext.relatedResources, ...firstContext.relatedFiles]
+      .slice(0, 6)
+      .map((item) => `- ${item.moduleName ? `${item.moduleName}: ` : ""}${item.title} (${item.type})`)
+      .join("\n");
+
+    return [
+      `Based on synced Canvas data, ${assignment.courseName}: ${assignment.name} is a ${assignmentKindLabel(
+        assignment,
+      )}.`,
+      `Status: ${isSubmitted(assignment) ? "submitted" : assignment.workflowState || "unsubmitted"}. Due: ${formatDateTime(
+        assignment.dueAt,
+      )}.`,
+      assignment.description ? `What it appears to be about: ${assignment.description}` : "Canvas did not provide a synced description for this item.",
+      `Rubric or marking signals:\n${rubric}`,
+      resources ? `Useful Canvas resources I found:\n${resources}` : "I could not find related files or module resources in the latest sync.",
+      firstContext.missingContext.length ? `Missing context: ${firstContext.missingContext.join(" ")}` : null,
+      `Last sync: ${lastSync}.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (topAssignments.length) {
+    const ordered = topAssignments.map((assignment, index) => `${index + 1}. ${assignmentLine(assignment)}`).join("\n");
+    const announcementLine = input.announcements.length
+      ? `Recent announcements to check:\n${input.announcements.slice(0, 4).map((item) => `- ${item}`).join("\n")}`
+      : "No recent announcements were included in the current dashboard sync.";
+
+    return [
+      "Here is the safest order from your synced Canvas data:",
+      ordered,
+      announcementLine,
+      "I am using the local priority algorithm because the AI provider is unavailable right now. I will still avoid inventing Canvas facts.",
+      `Last sync: ${lastSync}.`,
+    ].join("\n\n");
+  }
+
+  return `I do not see synced open assignments yet. Last sync: ${lastSync}. Run Canvas sync, then ask again and I can rank tasks, explain rubrics, and point to related files/modules.`;
 }

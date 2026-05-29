@@ -62,7 +62,7 @@ describe("CanvasClient", () => {
     );
   });
 
-  it("requests assignment rubrics and module items for richer context", async () => {
+  it("requests assignment submissions, date overrides, and module items for richer context", async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]))));
 
     const client = new CanvasClient({
@@ -76,7 +76,12 @@ describe("CanvasClient", () => {
 
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining("include[]=rubric"),
+      expect.stringContaining("include[]=submission"),
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("include[]=all_dates"),
       expect.objectContaining({ headers: expect.any(Object) }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(

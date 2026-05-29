@@ -38,10 +38,12 @@ export function formatRelative(value: string | null | undefined) {
 }
 
 export function isSubmitted(assignment: AssignmentSummary) {
-  return Boolean(assignment.submittedAt) || assignment.workflowState === "submitted";
+  const state = assignment.workflowState?.toLowerCase();
+  return Boolean(assignment.submittedAt) || state === "submitted" || state === "graded" || state === "complete" || state === "pending_review";
 }
 
 export function riskForAssignment(assignment: AssignmentSummary): RiskLevel {
+  if (assignment.priorityLabel) return assignment.priorityLabel;
   if (isSubmitted(assignment)) return "low";
   const due = dateValue(assignment.dueAt);
   if (!due) return "low";
@@ -53,6 +55,7 @@ export function riskForAssignment(assignment: AssignmentSummary): RiskLevel {
 }
 
 export function estimateEffort(assignment: AssignmentSummary) {
+  if (assignment.estimatedTime) return assignment.estimatedTime;
   const risk = riskForAssignment(assignment);
   if (assignment.pointsPossible && assignment.pointsPossible >= 40) return "3-5h";
   if (risk === "critical") return "1-3h";
@@ -66,6 +69,20 @@ export function statusLabel(assignment: AssignmentSummary) {
   if (assignment.late) return "Late";
   if (assignment.missing) return "Missing";
   return "Unsubmitted";
+}
+
+export function assignmentTypeLabel(assignment: AssignmentSummary) {
+  const type = assignment.assignmentType || "assignment";
+  if (type === "quiz") return "Quiz";
+  if (type === "discussion") return "Discussion";
+  if (type === "file_upload") return "File upload";
+  if (type === "external_tool") return "External tool";
+  if (type === "text_entry") return "Text entry";
+  if (type === "url") return "URL submission";
+  if (type === "media") return "Media";
+  if (type === "annotation") return "Annotation";
+  if (type === "on_paper") return "On paper";
+  return "Assignment";
 }
 
 export function riskTone(risk: RiskLevel) {

@@ -2,8 +2,22 @@ import type { ViewType } from "./lib/utils";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
+export type AssignmentType =
+  | "quiz"
+  | "assignment"
+  | "discussion"
+  | "file_upload"
+  | "external_tool"
+  | "on_paper"
+  | "text_entry"
+  | "url"
+  | "media"
+  | "annotation"
+  | "unknown";
+
 export type AssignmentSummary = {
   id: string;
+  courseId?: string;
   canvasAssignmentId: number;
   courseName: string;
   courseCode?: string | null;
@@ -13,6 +27,13 @@ export type AssignmentSummary = {
   htmlUrl?: string | null;
   description?: string | null;
   rubricSummary?: string | null;
+  submissionTypes?: string[] | null;
+  assignmentType?: AssignmentType;
+  priorityScore?: number;
+  priorityLabel?: RiskLevel;
+  priorityReason?: string;
+  estimatedTime?: string;
+  dueStatus?: "overdue" | "due_today" | "due_this_week" | "upcoming" | "undated" | "submitted";
   submittedAt?: string | null;
   workflowState?: string | null;
   missing?: boolean | null;
@@ -44,6 +65,25 @@ export type FileSummary = {
   size?: number | null;
   updatedAtCanvas?: string | null;
   url?: string | null;
+};
+
+export type CourseDashboardSummary = {
+  courseId: string;
+  canvasCourseId?: number;
+  name: string;
+  courseCode?: string | null;
+  term?: string | null;
+  active: boolean;
+  totalAssignments: number;
+  submittedAssignments: number;
+  unsubmittedAssignments: number;
+  overdueAssignments: number;
+  dueToday: number;
+  dueThisWeek: number;
+  recentAnnouncements: number;
+  recentFiles: number;
+  riskLevel: RiskLevel;
+  nextAssignment?: AssignmentSummary | null;
 };
 
 export type StudyBlock = {
@@ -122,6 +162,8 @@ export type DashboardSummary = {
   announcements: AnnouncementSummary[];
   files: FileSummary[];
   riskLevel: RiskLevel;
+  priorityItems?: AssignmentSummary[];
+  courseBreakdown?: CourseDashboardSummary[];
 };
 
 export type CreateStudySessionInput = {

@@ -5,10 +5,20 @@ import { getDashboardData } from "@/lib/data/dashboard";
 import { getChatAssignmentContextsForUser } from "@/lib/data/assignment-context";
 import { chatWithCanvasContext } from "@/lib/ai/gemini";
 import { rateLimit } from "@/lib/rate-limit";
+import type { CanvasAssignmentSummary } from "@/lib/types";
 
 const chatSchema = z.object({
   message: z.string().min(2).max(1000),
 });
+
+function uniqueAssignments(assignments: CanvasAssignmentSummary[]) {
+  const seen = new Set<string>();
+  return assignments.filter((assignment) => {
+    if (seen.has(assignment.id)) return false;
+    seen.add(assignment.id);
+    return true;
+  });
+}
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +32,12 @@ export async function POST(request: Request) {
       message,
       name: dashboard.userName,
       lastSyncAt: dashboard.lastSyncAt,
-      due: [...dashboard.dueToday, ...dashboard.dueThisWeek, ...dashboard.unsubmitted].slice(0, 12),
+      due: uniqueAssignments([
+        ...(dashboard.priorityItems || []),
+        ...dashboard.dueToday,
+        ...dashboard.dueThisWeek,
+        ...dashboard.unsubmitted,
+      ]).slice(0, 16),
       announcements: dashboard.announcements.map((item) => `${item.courseName}: ${item.title}`),
       assignmentContexts,
     });

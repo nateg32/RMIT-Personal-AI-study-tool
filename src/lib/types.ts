@@ -1,5 +1,18 @@
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
+export type AssignmentType =
+  | "quiz"
+  | "assignment"
+  | "discussion"
+  | "file_upload"
+  | "external_tool"
+  | "on_paper"
+  | "text_entry"
+  | "url"
+  | "media"
+  | "annotation"
+  | "unknown";
+
 export type StudyBlock = {
   name: string;
   minutes: number;
@@ -41,6 +54,7 @@ export type DailyBriefJson = {
 
 export type CanvasAssignmentSummary = {
   id: string;
+  courseId?: string;
   canvasAssignmentId: number;
   courseName: string;
   courseCode?: string | null;
@@ -51,10 +65,36 @@ export type CanvasAssignmentSummary = {
   description?: string | null;
   rubricSummary?: string | null;
   rubric?: unknown;
+  submissionTypes?: string[] | null;
+  assignmentType?: AssignmentType;
+  priorityScore?: number;
+  priorityLabel?: RiskLevel;
+  priorityReason?: string;
+  estimatedTime?: string;
+  dueStatus?: "overdue" | "due_today" | "due_this_week" | "upcoming" | "undated" | "submitted";
   submittedAt?: Date | string | null;
   workflowState?: string | null;
   missing?: boolean | null;
   late?: boolean | null;
+};
+
+export type CourseDashboardSummary = {
+  courseId: string;
+  canvasCourseId?: number;
+  name: string;
+  courseCode?: string | null;
+  term?: string | null;
+  active: boolean;
+  totalAssignments: number;
+  submittedAssignments: number;
+  unsubmittedAssignments: number;
+  overdueAssignments: number;
+  dueToday: number;
+  dueThisWeek: number;
+  recentAnnouncements: number;
+  recentFiles: number;
+  riskLevel: RiskLevel;
+  nextAssignment?: CanvasAssignmentSummary | null;
 };
 
 export type AssignmentContextResource = {
@@ -115,4 +155,6 @@ export type DashboardSummary = {
     url?: string | null;
   }>;
   riskLevel: RiskLevel;
+  priorityItems?: CanvasAssignmentSummary[];
+  courseBreakdown?: CourseDashboardSummary[];
 };

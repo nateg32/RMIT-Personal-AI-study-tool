@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
-import type { AssignmentSummary, DailyBrief, DashboardSummary, StudySidekickActions } from "../types";
-import { estimateEffort, formatRelative, riskTone, statusLabel } from "../lib/client-utils";
+import type { AssignmentSummary, CourseDashboardSummary, DailyBrief, DashboardSummary, StudySidekickActions } from "../types";
+import { assignmentTypeLabel, estimateEffort, formatRelative, riskTone, statusLabel } from "../lib/client-utils";
 
 type DashboardViewProps = {
   dashboard: DashboardSummary;
@@ -44,9 +44,14 @@ function MissionCard({
           <h4 className="font-headline-md text-headline-md text-on-primary-container line-clamp-2">
             {assignment.name}
           </h4>
-          <p className="font-label-md text-label-md text-on-surface-variant mt-xs">{formatRelative(assignment.dueAt)}</p>
+          <p className="font-label-md text-label-md text-on-surface-variant mt-xs">
+            {assignmentTypeLabel(assignment)} - {formatRelative(assignment.dueAt)}
+          </p>
         </div>
       </div>
+      {assignment.priorityReason ? (
+        <p className="font-body-md text-on-primary-container/80 line-clamp-2 mb-md">{assignment.priorityReason}</p>
+      ) : null}
       <div className="mt-auto flex items-center justify-between z-10 gap-sm">
         <span className="px-md py-xs bg-white/60 rounded-full font-label-sm text-label-sm border border-primary/20">
           {estimateEffort(assignment)}
@@ -67,21 +72,64 @@ function MissionCard({
   );
 }
 
+function SubjectCard({ course }: { course: CourseDashboardSummary }) {
+  const next = course.nextAssignment;
+  return (
+    <article className="bg-surface-container-low border-2 border-surface-variant rounded-lg p-md bubbly-shadow min-w-0">
+      <div className="flex items-start justify-between gap-sm">
+        <div className="min-w-0">
+          <p className="font-label-sm text-label-sm text-primary uppercase line-clamp-1">
+            {course.courseCode || "Canvas course"}
+          </p>
+          <h3 className="font-headline-md text-headline-md text-on-surface line-clamp-2">{course.name}</h3>
+        </div>
+        <span className={`font-label-sm text-label-sm px-sm py-xs rounded-full border ${riskTone(course.riskLevel)}`}>
+          {course.riskLevel}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-xs my-md text-center">
+        <div className="bg-white/60 rounded-lg p-xs">
+          <p className="font-headline-md text-headline-md">{course.unsubmittedAssignments}</p>
+          <p className="font-label-sm text-label-sm text-on-surface-variant">Open</p>
+        </div>
+        <div className="bg-white/60 rounded-lg p-xs">
+          <p className="font-headline-md text-headline-md">{course.dueThisWeek + course.dueToday}</p>
+          <p className="font-label-sm text-label-sm text-on-surface-variant">Week</p>
+        </div>
+        <div className="bg-white/60 rounded-lg p-xs">
+          <p className="font-headline-md text-headline-md">{course.recentFiles}</p>
+          <p className="font-label-sm text-label-sm text-on-surface-variant">Files</p>
+        </div>
+      </div>
+      <p className="font-label-md text-label-md text-on-surface-variant line-clamp-2">
+        {next ? `Next: ${next.name} (${formatRelative(next.dueAt)})` : "No open Canvas task found for this course."}
+      </p>
+    </article>
+  );
+}
+
 export default function DashboardView({ dashboard, dailyBrief, actions, onCreateSession }: DashboardViewProps) {
   const [search, setSearch] = useState("");
   const missionAssignments = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const items = dashboard.unsubmitted.length
-      ? dashboard.unsubmitted
+    const items = dashboard.priorityItems?.length
+      ? dashboard.priorityItems
+      : dashboard.unsubmitted.length
+        ? dashboard.unsubmitted
       : [...dashboard.dueToday, ...dashboard.dueThisWeek];
     return items
       .filter((item) =>
         query ? `${item.courseName} ${item.name} ${item.description || ""}`.toLowerCase().includes(query) : true,
       )
       .slice(0, 3);
-  }, [dashboard.dueThisWeek, dashboard.dueToday, dashboard.unsubmitted, search]);
+  }, [dashboard.dueThisWeek, dashboard.dueToday, dashboard.priorityItems, dashboard.unsubmitted, search]);
   const nextDeadline = missionAssignments[0];
   const briefJson = dailyBrief?.generatedJson;
+  const courseBreakdown = dashboard.courseBreakdown || [];
+  const briefingSummary =
+    dashboard.priorityItems?.length
+      ? dashboard.todayMission[0]
+      : briefJson?.summary || dailyBrief?.summary || "Sync Canvas to build your daily brief.";
 
   return (
     <div className="p-margin-desktop min-h-screen flex flex-col">
@@ -151,7 +199,7 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
                 </span>
               </h3>
               <p className="font-body-md mb-md text-on-tertiary-fixed-variant opacity-80">
-                {briefJson?.summary || dailyBrief?.summary || dashboard.todayMission[0] || "Sync Canvas to build your daily brief."}
+                {briefingSummary}
               </p>
               <div className="flex gap-lg">
                 <div className="flex flex-col">
@@ -205,6 +253,27 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
             </div>
           </div>
         </div>
+
+        {courseBreakdown.length ? (
+          <section className="mb-xl">
+            <div className="flex items-center justify-between mb-md">
+              <h2 className="font-headline-lg text-headline-lg text-primary flex items-center gap-sm">
+                Subject Radar
+                <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  school
+                </span>
+              </h2>
+              <span className="font-label-md text-label-md text-on-surface-variant">
+                {courseBreakdown.length} synced subjects
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-gutter">
+              {courseBreakdown.map((course) => (
+                <SubjectCard key={course.courseId} course={course} />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="mb-xl">
           <div className="flex items-center justify-between mb-lg">

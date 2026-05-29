@@ -41,6 +41,9 @@ export type CanvasAssignment = {
   submission?: CanvasSubmission | null;
   rubric?: CanvasRubricCriterion[] | null;
   rubric_settings?: Record<string, unknown> | null;
+  all_dates?: unknown[] | null;
+  overrides?: unknown[] | null;
+  score_statistics?: Record<string, unknown> | null;
 };
 
 export type CanvasRubricCriterion = {
@@ -138,13 +141,13 @@ export class CanvasClient {
 
   async getAssignmentsWithSubmissions(courseId: number) {
     return this.getAllPages<CanvasAssignment>(
-      `/api/v1/courses/${courseId}/assignments?include[]=submission&include[]=rubric&per_page=50`,
+      `/api/v1/courses/${courseId}/assignments?include[]=submission&include[]=all_dates&include[]=overrides&include[]=score_statistics&order_by=due_at&per_page=100`,
     );
   }
 
   async getAssignmentDetails(courseId: number, assignmentId: number) {
     return this.request<CanvasAssignment>(
-      `/api/v1/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=rubric`,
+      `/api/v1/courses/${courseId}/assignments/${assignmentId}?include[]=submission&include[]=overrides&include[]=score_statistics&all_dates=true`,
     );
   }
 

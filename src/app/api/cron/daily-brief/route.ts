@@ -21,6 +21,7 @@ export async function GET(request: Request) {
         name: dashboard.userName,
         dueToday: dashboard.dueToday,
         dueThisWeek: dashboard.dueThisWeek,
+        priorityItems: dashboard.priorityItems,
         announcements: dashboard.announcements.map((item) => `${item.courseName}: ${item.title}`),
         files: dashboard.files.map((item) => `${item.courseName}: ${item.name}`),
       });

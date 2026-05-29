@@ -3,12 +3,17 @@ import { addDays, endOfDay, startOfDay, subHours } from "date-fns";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
 import { demoDashboard } from "@/lib/mock-data";
-import { getOverallRisk, sortByPriority } from "@/lib/prioritization";
+import { getOverallRisk, isSubmitted, sortByPriority, withPrioritySignals } from "@/lib/prioritization";
 import type { CanvasAssignmentSummary, DashboardSummary } from "@/lib/types";
 import { isDemoUser } from "@/lib/auth";
 
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
 function assignmentSummary(assignment: {
   id: string;
+  courseId: string;
   canvasAssignmentId: number;
   name: string;
   dueAt: Date | null;
@@ -17,6 +22,7 @@ function assignmentSummary(assignment: {
   description?: string | null;
   rubricSummary?: string | null;
   rubric?: unknown;
+  submissionTypes?: unknown;
   course: { name: string; courseCode: string | null };
   submission: {
     submittedAt: Date | null;
@@ -27,6 +33,7 @@ function assignmentSummary(assignment: {
 }): CanvasAssignmentSummary {
   return {
     id: assignment.id,
+    courseId: assignment.courseId,
     canvasAssignmentId: assignment.canvasAssignmentId,
     courseName: assignment.course.name,
     courseCode: assignment.course.courseCode,
@@ -37,6 +44,7 @@ function assignmentSummary(assignment: {
     description: assignment.description,
     rubricSummary: assignment.rubricSummary,
     rubric: assignment.rubric,
+    submissionTypes: stringArray(assignment.submissionTypes),
     submittedAt: assignment.submission?.submittedAt,
     workflowState: assignment.submission?.workflowState,
     missing: assignment.submission?.missing,
@@ -63,19 +71,20 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
   const lastSyncAt = connection?.lastSyncAt || latestSync?.createdAt || null;
   const canvasConfigured = Boolean(connection || (env.CANVAS_BASE_URL && env.CANVAS_ACCESS_TOKEN));
 
-  const assignments = await db.assignment.findMany({
-    where: {
-      userId: user.id,
-      dueAt: { not: null, lte: weekEnd },
-    },
-    include: { course: true, submission: true },
-    orderBy: [{ dueAt: "asc" }],
-    take: 50,
+  const courses = await db.course.findMany({
+    where: { userId: user.id },
+    orderBy: [{ active: "desc" }, { name: "asc" }],
   });
 
-  const summaries = assignments.map(assignmentSummary);
+  const assignments = await db.assignment.findMany({
+    where: { userId: user.id },
+    include: { course: true, submission: true },
+    orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
+  });
+
+  const summaries = assignments.map((assignment) => withPrioritySignals(assignmentSummary(assignment), now));
   const unsubmitted = sortByPriority(
-    summaries.filter((item) => !item.submittedAt && item.workflowState !== "submitted"),
+    summaries.filter((item) => !isSubmitted(item)),
   );
 
   const dueToday = unsubmitted.filter((assignment) => {
@@ -95,6 +104,12 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     take: 8,
   });
 
+  const allRecentAnnouncements = await db.announcement.findMany({
+    where: { userId: user.id, postedAt: { gte: subHours(now, 24 * 14) } },
+    select: { courseId: true },
+    take: 200,
+  });
+
   const files = await db.canvasFile.findMany({
     where: { userId: user.id },
     include: { course: true },
@@ -102,8 +117,41 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     take: 8,
   });
 
+  const allRecentFiles = await db.canvasFile.findMany({
+    where: { userId: user.id },
+    select: { courseId: true, updatedAtCanvas: true, createdAt: true },
+    orderBy: [{ updatedAtCanvas: "desc" }, { createdAt: "desc" }],
+    take: 200,
+  });
+
   const stale = !lastSyncAt || lastSyncAt < subHours(now, 12);
-  const priority = unsubmitted.slice(0, 4);
+  const priority = unsubmitted.slice(0, 6);
+  const courseBreakdown = courses.map((course) => {
+    const courseAssignments = summaries.filter((assignment) => assignment.courseId === course.id);
+    const courseUnsubmitted = courseAssignments.filter((assignment) => !isSubmitted(assignment));
+    const courseDueToday = courseUnsubmitted.filter((assignment) => assignment.dueStatus === "due_today");
+    const courseDueThisWeek = courseUnsubmitted.filter((assignment) => assignment.dueStatus === "due_this_week");
+    const courseOverdue = courseUnsubmitted.filter((assignment) => assignment.dueStatus === "overdue");
+    const rankedCourseAssignments = sortByPriority(courseUnsubmitted);
+    return {
+      courseId: course.id,
+      canvasCourseId: course.canvasCourseId,
+      name: course.name,
+      courseCode: course.courseCode,
+      term: course.term,
+      active: course.active,
+      totalAssignments: courseAssignments.length,
+      submittedAssignments: courseAssignments.filter(isSubmitted).length,
+      unsubmittedAssignments: courseUnsubmitted.length,
+      overdueAssignments: courseOverdue.length,
+      dueToday: courseDueToday.length,
+      dueThisWeek: courseDueThisWeek.length,
+      recentAnnouncements: allRecentAnnouncements.filter((announcement) => announcement.courseId === course.id).length,
+      recentFiles: allRecentFiles.filter((file) => file.courseId === course.id).length,
+      riskLevel: getOverallRisk(courseUnsubmitted),
+      nextAssignment: rankedCourseAssignments[0] || null,
+    };
+  });
 
   return {
     userName: user.name.split(" ")[0] || user.name,
@@ -114,7 +162,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
     riskLevel: getOverallRisk(unsubmitted),
     todayMission:
       priority.length > 0
-        ? priority.map((assignment) => `${assignment.courseName}: ${assignment.name}`)
+        ? priority.map((assignment) => `${assignment.courseName}: ${assignment.name} - ${assignment.priorityReason}`)
         : ["No urgent Canvas tasks found. Use the time for review or planning."],
     dueToday,
     dueThisWeek,
@@ -133,5 +181,7 @@ export async function getDashboardData(user: User): Promise<DashboardSummary> {
       updatedAtCanvas: file.updatedAtCanvas?.toISOString() || null,
       url: file.url,
     })),
+    priorityItems: priority,
+    courseBreakdown,
   };
 }
