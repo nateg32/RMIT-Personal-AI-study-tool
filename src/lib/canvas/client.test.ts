@@ -41,6 +41,27 @@ describe("CanvasClient", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("normalizes pasted Canvas tokens before sending the auth header", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 })));
+
+    const client = new CanvasClient({
+      baseUrl: "https://canvas.test",
+      token: "Bearer 9595~abc\r\nDEF ",
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    await client.request<{ id: number }>("/api/v1/users/self/profile");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer 9595~abcDEF",
+        }),
+      }),
+    );
+  });
+
   it("requests assignment rubrics and module items for richer context", async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]))));
 

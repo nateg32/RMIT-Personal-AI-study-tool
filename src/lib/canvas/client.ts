@@ -3,6 +3,14 @@ import { redactSecret } from "@/lib/utils";
 
 type Fetcher = typeof fetch;
 
+function normalizeAccessToken(token: string) {
+  return token
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, "");
+}
+
 export type CanvasCourse = {
   id: number;
   name?: string;
@@ -103,7 +111,7 @@ export class CanvasClient {
     timeoutMs?: number;
   }) {
     this.baseUrl = input.baseUrl.replace(/\/$/, "");
-    this.token = input.token;
+    this.token = normalizeAccessToken(input.token);
     this.fetcher = input.fetcher || fetch;
     this.timeoutMs = input.timeoutMs || 20_000;
   }
