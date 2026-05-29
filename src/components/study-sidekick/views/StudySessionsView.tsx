@@ -29,7 +29,46 @@ const durations = [25, 50, 90, 120];
 const energyLevels = ["Low", "Medium", "High"];
 const modes = ["Understand task", "Plan assignment", "Write draft", "Final review", "Emergency mode"];
 const outcomes = ["Just complete", "Credit", "Distinction", "HD"];
+const SESSION_PREFS_KEY = "study-sidekick-session-preferences-v1";
 type SessionMode = "canvas" | "custom";
+
+const defaultSessionPreferences = {
+  duration: 50,
+  energyLevel: "Medium",
+  mode: "Plan assignment",
+  targetOutcome: "Credit",
+};
+
+function clampMinutes(value: number) {
+  return Math.max(15, Math.min(480, Number.isFinite(value) ? Math.round(value) : defaultSessionPreferences.duration));
+}
+
+function clampBreakMinutes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return Math.max(1, Math.min(60, Math.round(value)));
+}
+
+function loadSessionPreferences() {
+  if (typeof window === "undefined") return defaultSessionPreferences;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SESSION_PREFS_KEY) || "{}") as Partial<typeof defaultSessionPreferences>;
+    return {
+      duration: clampMinutes(Number(parsed.duration || defaultSessionPreferences.duration)),
+      energyLevel: energyLevels.includes(parsed.energyLevel || "") ? parsed.energyLevel! : defaultSessionPreferences.energyLevel,
+      mode: modes.includes(parsed.mode || "") ? parsed.mode! : defaultSessionPreferences.mode,
+      targetOutcome: outcomes.includes(parsed.targetOutcome || "") ? parsed.targetOutcome! : defaultSessionPreferences.targetOutcome,
+    };
+  } catch {
+    return defaultSessionPreferences;
+  }
+}
+
+function textLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function fallbackPlan(assignment?: AssignmentSummary | null, duration = 50): StudyPlan {
   const title = assignment ? `${assignment.name} Battle Plan` : "Canvas Study Session";
@@ -81,20 +120,25 @@ export default function StudySessionsView({
   actions,
 }: StudySessionsViewProps) {
   const [search, setSearch] = useState("");
+  const [initialPreferences] = useState(() => loadSessionPreferences());
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [sessionMode, setSessionMode] = useState<SessionMode>("canvas");
-  const [duration, setDuration] = useState(50);
-  const [energyLevel, setEnergyLevel] = useState("Medium");
-  const [mode, setMode] = useState("Plan assignment");
-  const [targetOutcome, setTargetOutcome] = useState("Credit");
+  const [duration, setDuration] = useState(initialPreferences.duration);
+  const [energyLevel, setEnergyLevel] = useState(initialPreferences.energyLevel);
+  const [mode, setMode] = useState(initialPreferences.mode);
+  const [targetOutcome, setTargetOutcome] = useState(initialPreferences.targetOutcome);
   const [customTitle, setCustomTitle] = useState("");
   const [customFocus, setCustomFocus] = useState("");
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: 50 * 60, running: false });
   const [sessionUploadFile, setSessionUploadFile] = useState<File | null>(null);
   const [sessionUploadNotes, setSessionUploadNotes] = useState("");
   const [isUploadingMaterial, setIsUploadingMaterial] = useState(false);
+  const [showSetupOptions, setShowSetupOptions] = useState(false);
+  const [showPlanEditor, setShowPlanEditor] = useState(false);
+  const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
+  const [checklistDraft, setChecklistDraft] = useState("");
 
   const selectedSession = selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) || null : null;
   const assignmentFromSession = selectedSession?.assignmentId
@@ -146,6 +190,16 @@ export default function StudySessionsView({
   const checklist = plan.checklist || [];
   const completedCount = checklist.filter((item) => completedMap[item]).length;
   const progress = totalSeconds ? Math.round(((totalSeconds - secondsLeft) / totalSeconds) * 691) : 0;
+  const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
+  const checklistText = checklist.join("\n");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      SESSION_PREFS_KEY,
+      JSON.stringify({ duration, energyLevel, mode, targetOutcome }),
+    );
+  }, [duration, energyLevel, mode, targetOutcome]);
 
   const generateSession = () => {
     if (sessionMode === "custom") {
@@ -210,6 +264,7 @@ export default function StudySessionsView({
 
   const selectSession = (sessionId: string) => {
     const session = sessions.find((item) => item.id === sessionId) || null;
+    setShowPlanEditor(false);
     setSelectedSessionId(session?.id || null);
     if (!session) {
       setSessionTitle(null);
@@ -234,6 +289,7 @@ export default function StudySessionsView({
   };
 
   const selectBlock = async (index: number) => {
+    setShowPlanEditor(false);
     const nextSeconds = Math.max(60, (plan.blocks[index]?.minutes || duration) * 60);
     setActiveBlockIndex(index);
     setTimerState({
@@ -262,6 +318,42 @@ export default function StudySessionsView({
     actions.onOpenChat(
       `Help me with this focus session: ${plan.title}. Current block: ${activeBlock?.name || "not selected"}.${blockTasks}`,
     );
+  };
+
+  const openPlanEditor = () => {
+    setBlockDraft({
+      name: activeBlock?.name || "",
+      minutes: String(activeBlock?.minutes || duration),
+      tasks: activeBlockTasksText,
+      breakMinutes: activeBlock?.breakMinutes ? String(activeBlock.breakMinutes) : "",
+    });
+    setChecklistDraft(checklistText);
+    setShowPlanEditor(true);
+  };
+
+  const savePlanEdits = async () => {
+    if (!activeSession) return;
+    const nextTasks = textLines(blockDraft.tasks);
+    const nextChecklist = textLines(checklistDraft);
+    const nextBreak = blockDraft.breakMinutes ? clampBreakMinutes(Number(blockDraft.breakMinutes)) : undefined;
+    const nextBlocks = plan.blocks.map((block, index) =>
+      index === safeActiveBlockIndex
+        ? {
+            ...block,
+            name: blockDraft.name.trim() || block.name,
+            minutes: clampMinutes(Number(blockDraft.minutes || block.minutes)),
+            tasks: nextTasks.length ? nextTasks : block.tasks,
+            breakMinutes: nextBreak,
+          }
+        : block,
+    );
+    const nextPlan: StudyPlan = {
+      ...plan,
+      blocks: nextBlocks,
+      checklist: nextChecklist.length ? nextChecklist : checklist,
+    };
+    await onUpdateSession(activeSession.id, nextPlan, activeSession.status || "planned");
+    setShowPlanEditor(false);
   };
 
   return (
@@ -526,8 +618,36 @@ export default function StudySessionsView({
                   className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
                 />
               </label>
+              <div className="mt-md rounded-lg border-2 border-primary-fixed-dim bg-primary-container/30 p-sm">
+                <p className="font-label-md text-label-md text-on-surface-variant">Using your defaults</p>
+                <p className="font-body-md text-on-surface">
+                  {mode} - {energyLevel} energy - {targetOutcome}
+                </p>
+                <button
+                  type="button"
+                  className="mt-sm w-full rounded-full border-2 border-primary-fixed-dim bg-white/80 py-xs font-label-md text-label-md bubbly-button"
+                  onClick={() => setShowSetupOptions((current) => !current)}
+                >
+                  {showSetupOptions ? "Hide preferences" : "Customize preferences"}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="mt-md bubbly-button w-full bg-primary text-on-primary font-bold py-md rounded-lg flex items-center justify-center gap-sm shadow-lg disabled:opacity-60"
+                onClick={generateSession}
+                disabled={isCreatingSession || (sessionMode === "canvas" && !selectedAssignment)}
+              >
+                <span className="material-symbols-outlined">auto_awesome</span>
+                {isCreatingSession
+                  ? "Generating..."
+                  : sessionMode === "custom"
+                    ? "Generate custom focus plan"
+                    : "Generate Canvas-specific plan"}
+              </button>
             </div>
 
+            {showSetupOptions ? (
+            <>
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">battery_charging_80</span>
@@ -595,20 +715,9 @@ export default function StudySessionsView({
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className="mt-md bubbly-button w-full bg-primary text-on-primary font-bold py-md rounded-lg flex items-center justify-center gap-sm shadow-lg disabled:opacity-60"
-                onClick={generateSession}
-                disabled={isCreatingSession || (sessionMode === "canvas" && !selectedAssignment)}
-              >
-                <span className="material-symbols-outlined">auto_awesome</span>
-                {isCreatingSession
-                  ? "Generating..."
-                  : sessionMode === "custom"
-                    ? "Generate custom focus plan"
-                    : "Generate Canvas-specific plan"}
-              </button>
             </div>
+            </>
+            ) : null}
           </div>
 
           <div className="col-span-12 lg:col-span-7 space-y-gutter">
@@ -714,7 +823,7 @@ export default function StudySessionsView({
                   <span className="material-symbols-outlined">restart_alt</span>
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm w-full mt-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-sm w-full mt-sm">
                 <button
                   type="button"
                   className="bubbly-button bg-white text-primary border-2 border-primary-fixed-dim font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
@@ -726,6 +835,15 @@ export default function StudySessionsView({
                 </button>
                 <button
                   type="button"
+                  className="bubbly-button bg-white text-primary border-2 border-primary-fixed-dim font-bold py-sm rounded-lg flex items-center justify-center gap-sm disabled:opacity-60"
+                  onClick={() => (showPlanEditor ? setShowPlanEditor(false) : openPlanEditor())}
+                  disabled={!activeSession}
+                >
+                  <span className="material-symbols-outlined">tune</span>
+                  Customize plan
+                </button>
+                <button
+                  type="button"
                   className="bubbly-button bg-white text-secondary border-2 border-secondary-fixed-dim font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
                   onClick={askAboutSession}
                 >
@@ -734,6 +852,85 @@ export default function StudySessionsView({
                 </button>
               </div>
             </div>
+
+            {showPlanEditor && activeSession ? (
+              <div className="bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim bubbly-shadow">
+                <div className="flex items-center justify-between gap-sm mb-md">
+                  <div className="flex items-center gap-sm">
+                    <span className="material-symbols-outlined text-primary">edit_square</span>
+                    <h3 className="font-headline-md text-headline-md">Customize this session</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full bg-surface-container px-sm py-xs font-label-md text-label-md"
+                    onClick={() => setShowPlanEditor(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                  <label className="block md:col-span-2">
+                    <span className="font-label-md text-label-md text-on-surface-variant">Current block name</span>
+                    <input
+                      value={blockDraft.name}
+                      onChange={(event) => setBlockDraft((current) => ({ ...current, name: event.target.value }))}
+                      className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="font-label-md text-label-md text-on-surface-variant">Minutes</span>
+                    <input
+                      type="number"
+                      min={5}
+                      max={240}
+                      value={blockDraft.minutes}
+                      onChange={(event) => setBlockDraft((current) => ({ ...current, minutes: event.target.value }))}
+                      className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-sm mt-sm">
+                  <label className="block md:col-span-2">
+                    <span className="font-label-md text-label-md text-on-surface-variant">Tasks for this block</span>
+                    <textarea
+                      value={blockDraft.tasks}
+                      onChange={(event) => setBlockDraft((current) => ({ ...current, tasks: event.target.value }))}
+                      className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-32 resize-y"
+                      placeholder="One task per line"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="font-label-md text-label-md text-on-surface-variant">Break after block</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={blockDraft.breakMinutes}
+                      onChange={(event) => setBlockDraft((current) => ({ ...current, breakMinutes: event.target.value }))}
+                      className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+                <label className="block mt-sm">
+                  <span className="font-label-md text-label-md text-on-surface-variant">Checklist</span>
+                  <textarea
+                    value={checklistDraft}
+                    onChange={(event) => setChecklistDraft(event.target.value)}
+                    className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-28 resize-y"
+                    placeholder="One milestone per line"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="mt-sm bubbly-button w-full bg-primary text-on-primary font-bold py-sm rounded-lg flex items-center justify-center gap-sm"
+                  onClick={savePlanEdits}
+                >
+                  <span className="material-symbols-outlined">save</span>
+                  Save custom plan
+                </button>
+              </div>
+            ) : null}
 
             <div className="bg-surface-container-highest p-md rounded-lg border-2 border-primary-fixed-dim">
               <div className="flex items-center justify-between mb-md">
