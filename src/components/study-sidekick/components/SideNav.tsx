@@ -5,6 +5,9 @@ import { cn } from '../lib/utils';
 interface SideNavProps {
   activeView: ViewType;
   onNavigate: (view: ViewType) => void;
+  onStartSession: () => void;
+  onSupport: () => void;
+  onLogout: () => void;
 }
 
 const navItems = [
@@ -18,7 +21,7 @@ const navItems = [
   { id: 'settings' as const, icon: 'settings', label: 'Settings' },
 ];
 
-export default function SideNav({ activeView, onNavigate }: SideNavProps) {
+export default function SideNav({ activeView, onNavigate, onStartSession, onSupport, onLogout }: SideNavProps) {
   return (
     <aside className="fixed left-0 top-0 h-full w-[280px] bg-background border-r-2 border-surface-variant z-40 hidden md:flex flex-col">
       <div className="p-xl flex flex-col items-center text-center">
@@ -30,7 +33,11 @@ export default function SideNav({ activeView, onNavigate }: SideNavProps) {
       </div>
 
       <div className="px-lg pb-md">
-        <button className="w-full bg-primary text-on-primary font-bold py-sm rounded-full shadow-md hover:scale-[1.02] active:scale-95 transition-transform flex items-center justify-center gap-sm">
+        <button
+          type="button"
+          className="w-full bg-primary text-on-primary font-bold py-sm rounded-full shadow-md hover:scale-[1.02] active:scale-95 transition-transform flex items-center justify-center gap-sm"
+          onClick={onStartSession}
+        >
           <span className="material-symbols-outlined">timer</span>
           Start Session
         </button>
@@ -42,6 +49,7 @@ export default function SideNav({ activeView, onNavigate }: SideNavProps) {
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
               className={cn(
                 "w-full flex items-center gap-sm px-md py-sm rounded-lg transition-transform",
@@ -58,11 +66,19 @@ export default function SideNav({ activeView, onNavigate }: SideNavProps) {
         
         <div className="pt-md mt-md space-y-xs">
           <div className="h-[2px] bg-surface-variant rounded-full mb-md mx-md"></div>
-          <button className="w-full flex items-center gap-sm text-on-surface-variant px-md py-sm hover:bg-surface-variant text-left rounded-lg transition-all">
+          <button
+            type="button"
+            className="w-full flex items-center gap-sm text-on-surface-variant px-md py-sm hover:bg-surface-variant text-left rounded-lg transition-all"
+            onClick={onSupport}
+          >
             <span className="material-symbols-outlined">help</span>
             <span className="font-label-md text-label-md">Support</span>
           </button>
-          <button className="w-full flex items-center gap-sm text-on-surface-variant px-md py-sm hover:bg-error-container hover:text-error text-left rounded-lg transition-all">
+          <button
+            type="button"
+            className="w-full flex items-center gap-sm text-on-surface-variant px-md py-sm hover:bg-error-container hover:text-error text-left rounded-lg transition-all"
+            onClick={onLogout}
+          >
             <span className="material-symbols-outlined">logout</span>
             <span className="font-label-md text-label-md">Log Out</span>
           </button>

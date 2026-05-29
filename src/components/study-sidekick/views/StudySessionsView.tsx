@@ -1,194 +1,418 @@
-/* eslint-disable react/no-unescaped-entities */
-// src/views/StudySessionsView.tsx
+"use client";
 
-export default function StudySessionsView() {
+import { useEffect, useMemo, useState } from "react";
+import ViewHeader from "../components/ViewHeader";
+import type {
+  AssignmentSummary,
+  CreateStudySessionInput,
+  StudyPlan,
+  StudySessionRecord,
+  StudySidekickActions,
+} from "../types";
+import { compactText, estimateEffort, formatDate, riskForAssignment } from "../lib/client-utils";
+
+type StudySessionsViewProps = {
+  assignments: AssignmentSummary[];
+  sessions: StudySessionRecord[];
+  selectedAssignmentId: string | null;
+  onSelectAssignment: (assignmentId: string | null) => void;
+  onCreateSession: (input: CreateStudySessionInput) => void;
+  onUpdateSession: (sessionId: string, generatedPlanJson: StudyPlan, status?: string) => Promise<void>;
+  isCreatingSession: boolean;
+  actions: StudySidekickActions;
+};
+
+const durations = [25, 50, 90, 120];
+const energyLevels = ["Low", "Medium", "High"];
+const modes = ["Understand task", "Plan assignment", "Write draft", "Final review", "Emergency mode"];
+const outcomes = ["Just complete", "Credit", "Distinction", "HD"];
+
+function fallbackPlan(assignment?: AssignmentSummary | null, duration = 50): StudyPlan {
+  const title = assignment ? `${assignment.name} Battle Plan` : "Canvas Study Session";
+  return {
+    title,
+    durationMinutes: duration,
+    riskLevel: assignment ? riskForAssignment(assignment) : "low",
+    assignmentBrief: assignment?.description || "Choose an assignment and generate a Canvas-specific plan.",
+    blocks: [
+      {
+        name: "Understand the task",
+        minutes: Math.max(10, Math.round(duration * 0.25)),
+        tasks: ["Open Canvas brief", "Identify deliverables", "Rewrite the marking criteria in plain English"],
+      },
+      {
+        name: "Build the work plan",
+        minutes: Math.max(15, Math.round(duration * 0.45)),
+        tasks: ["Create headings", "Match each heading to rubric criteria", "List the evidence or files to use"],
+      },
+      {
+        name: "Submit a progress checkpoint",
+        minutes: Math.max(10, Math.round(duration * 0.3)),
+        tasks: ["Write the next action", "Check blockers", "Save your working file"],
+      },
+    ],
+    checklist: ["Canvas brief opened", "Rubric checked", "Next action written"],
+    definitionOfDone: ["You know what to submit", "You know where the supporting files are", "The next step is small enough to start"],
+    resourcesToOpen: assignment?.htmlUrl ? [{ title: "Open assignment in Canvas", url: assignment.htmlUrl }] : [],
+    nextAction: assignment ? `Open ${assignment.name} in Canvas and scan the rubric.` : "Pick an assignment.",
+  };
+}
+
+function minutesToClock(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
+}
+
+export default function StudySessionsView({
+  assignments,
+  sessions,
+  selectedAssignmentId,
+  onSelectAssignment,
+  onCreateSession,
+  onUpdateSession,
+  isCreatingSession,
+  actions,
+}: StudySessionsViewProps) {
+  const [search, setSearch] = useState("");
+  const [duration, setDuration] = useState(50);
+  const [energyLevel, setEnergyLevel] = useState("Medium");
+  const [mode, setMode] = useState("Plan assignment");
+  const [targetOutcome, setTargetOutcome] = useState("Credit");
+  const [timerState, setTimerState] = useState({ key: "", secondsLeft: 50 * 60, running: false });
+
+  const selectedAssignment = assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignments[0] || null;
+  const activeSession =
+    sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) || sessions[0] || null;
+  const plan = activeSession?.generatedPlanJson || fallbackPlan(selectedAssignment, duration);
+  const totalSeconds = Math.max(60, (plan.blocks[0]?.minutes || duration) * 60);
+  const timerKey = `${activeSession?.id || selectedAssignment?.id || "draft"}:${totalSeconds}`;
+  const timer = useMemo(
+    () => (timerState.key === timerKey ? timerState : { key: timerKey, secondsLeft: totalSeconds, running: false }),
+    [timerKey, timerState, totalSeconds],
+  );
+  const { secondsLeft, running } = timer;
+
+  useEffect(() => {
+    if (!running) return;
+    const interval = window.setInterval(() => {
+      setTimerState((current) => {
+        const active = current.key === timerKey ? current : timer;
+        if (active.secondsLeft <= 1) {
+          window.clearInterval(interval);
+          return { ...active, secondsLeft: 0, running: false };
+        }
+        return { ...active, secondsLeft: active.secondsLeft - 1 };
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [running, timer, timerKey]);
+
+  const filteredAssignments = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return assignments.filter((assignment) =>
+      query ? `${assignment.name} ${assignment.courseName}`.toLowerCase().includes(query) : true,
+    );
+  }, [assignments, search]);
+
+  const completedMap = plan.completedTasks || {};
+  const checklist = plan.checklist || [];
+  const completedCount = checklist.filter((item) => completedMap[item]).length;
+  const progress = totalSeconds ? Math.round(((totalSeconds - secondsLeft) / totalSeconds) * 691) : 0;
+
+  const generateSession = () => {
+    if (!selectedAssignment) {
+      actions.onOpenChat("I need to connect Canvas before creating a study session.");
+      return;
+    }
+    onCreateSession({
+      assignmentId: selectedAssignment.id,
+      durationMinutes: duration,
+      mode,
+      energyLevel,
+      targetOutcome,
+    });
+  };
+
+  const toggleChecklist = async (item: string) => {
+    if (!activeSession) return;
+    const nextPlan: StudyPlan = {
+      ...plan,
+      completedTasks: {
+        ...completedMap,
+        [item]: !completedMap[item],
+      },
+    };
+    await onUpdateSession(activeSession.id, nextPlan, completedMap[item] ? "planned" : "in_progress");
+  };
+
   return (
     <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
-      {/* Top Nav Bar Content */}
-      <header className="flex justify-between items-center w-full max-w-7xl mx-auto mb-lg sticky top-0 z-30 bg-background/80 backdrop-blur-md py-md -mx-margin-desktop px-margin-desktop">
-        <div className="flex items-center gap-md flex-1">
-          <h2 className="font-headline-lg text-headline-lg font-bold text-primary whitespace-nowrap">Study Command Centre</h2>
-          <div className="hidden lg:flex items-center bg-surface-container-low border-2 border-outline-variant rounded-full px-md py-xs flex-1 max-w-md">
-            <span className="material-symbols-outlined text-on-surface-variant mr-sm">search</span>
-            <input className="bg-transparent border-none focus:outline-none focus:ring-0 text-body-md w-full" placeholder="Search sessions..." type="text" />
-          </div>
-        </div>
-        <div className="flex items-center gap-md">
-          <div className="flex gap-sm">
-            <button className="p-sm rounded-full hover:bg-primary-container transition-colors scale-105 active:scale-95">
-              <span className="material-symbols-outlined text-primary">notifications</span>
-            </button>
-            <button className="p-sm rounded-full hover:bg-primary-container transition-colors scale-105 active:scale-95">
-              <span className="material-symbols-outlined text-primary">auto_awesome</span>
-            </button>
-            <div className="w-10 h-10 rounded-full border-2 border-primary overflow-hidden flex items-center justify-center bg-primary-container cursor-pointer active:scale-95 transition-all">
-              <span className="material-symbols-outlined text-primary">person</span>
-            </div>
-          </div>
-        </div>
-      </header>
+      <ViewHeader
+        searchPlaceholder="Search sessions..."
+        searchValue={search}
+        onSearchChange={setSearch}
+        actions={actions}
+      />
 
       <div className="max-w-7xl mx-auto w-full flex-grow pb-xl">
-        {/* Header Greeting */}
         <div className="mb-lg flex flex-col md:flex-row md:items-end justify-between gap-md mt-sm">
           <div>
-            <h1 className="font-display-lg text-display-lg text-primary mb-xs">Study Session Builder ✨</h1>
+            <h1 className="font-display-lg text-display-lg text-primary mb-xs">Study Session Builder</h1>
             <p className="text-body-lg font-body-lg text-on-surface-variant flex items-center gap-xs">
-              Designing a perfect flow for: <span className="font-bold text-secondary">Organic Chemistry Quiz Prep</span>
+              Designing a flow for:{" "}
+              <span className="font-bold text-secondary">
+                {selectedAssignment?.name || "Choose an assignment after syncing Canvas"}
+              </span>
             </p>
           </div>
           <div className="bg-tertiary-container px-md py-sm rounded-lg flex items-center gap-sm self-start md:self-auto">
             <span className="material-symbols-outlined text-on-tertiary-container">auto_awesome</span>
-            <p className="font-label-md text-on-tertiary-container italic">"You've got this, superstar!"</p>
+            <p className="font-label-md text-on-tertiary-container italic">
+              {selectedAssignment ? `${estimateEffort(selectedAssignment)} estimated effort` : "Canvas context powers this."}
+            </p>
           </div>
         </div>
 
         <div className="grid grid-cols-12 gap-gutter">
-          {/* Step 1: Configuration Sticky Notes */}
           <div className="col-span-12 lg:col-span-5 space-y-gutter">
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">assignment</span>
+                <h3 className="font-headline-md text-headline-md">Assignment</h3>
+              </div>
+              <select
+                value={selectedAssignment?.id || ""}
+                onChange={(event) => onSelectAssignment(event.target.value || null)}
+                className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+              >
+                {filteredAssignments.length ? (
+                  filteredAssignments.map((assignment) => (
+                    <option key={assignment.id} value={assignment.id}>
+                      {assignment.courseName}: {assignment.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No assignments synced</option>
+                )}
+              </select>
+              <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
+                {selectedAssignment ? `${formatDate(selectedAssignment.dueAt)} - ${selectedAssignment.courseName}` : "Sync Canvas first."}
+              </p>
+            </div>
+
+            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">
+              <div className="flex items-center gap-sm mb-md">
                 <span className="material-symbols-outlined text-primary">schedule</span>
-                <h3 className="font-headline-md text-headline-md">1. How long?</h3>
+                <h3 className="font-headline-md text-headline-md">How long?</h3>
+              </div>
+              <div className="grid grid-cols-4 gap-sm">
+                {durations.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`p-sm border-2 rounded-lg font-bold transition-all text-center ${
+                      duration === value ? "border-primary bg-primary-container hover-squish" : "border-surface-variant hover:border-primary"
+                    }`}
+                    onClick={() => setDuration(value)}
+                  >
+                    <span className="block text-xl">{value}m</span>
+                    <span className="text-xs uppercase opacity-70">{value <= 25 ? "Sprint" : value <= 50 ? "Classic" : "Deep"}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
+              <div className="flex items-center gap-sm mb-md">
+                <span className="material-symbols-outlined text-primary">battery_charging_80</span>
+                <h3 className="font-headline-md text-headline-md">Energy Level</h3>
               </div>
               <div className="grid grid-cols-3 gap-sm">
-                <button className="p-sm border-2 border-surface-variant rounded-lg font-bold hover:border-primary hover:bg-primary-container/30 transition-all text-center">
-                  <span className="block text-xl">25m</span>
-                  <span className="text-xs uppercase opacity-70">Quick Sprint</span>
-                </button>
-                <button className="p-sm border-2 border-primary bg-primary-container rounded-lg font-bold transition-all text-center hover-squish">
-                  <span className="block text-xl">50m</span>
-                  <span className="text-xs uppercase opacity-70">The Classic</span>
-                </button>
-                <button className="p-sm border-2 border-surface-variant rounded-lg font-bold hover:border-primary hover:bg-primary-container/30 transition-all text-center">
-                  <span className="block text-xl">90m</span>
-                  <span className="text-xs uppercase opacity-70">Deep Dive</span>
-                </button>
+                {energyLevels.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`p-sm border-2 rounded-lg font-bold transition-all flex flex-col items-center ${
+                      energyLevel === value ? "border-primary bg-primary-container hover-squish" : "border-surface-variant"
+                    }`}
+                    onClick={() => setEnergyLevel(value)}
+                  >
+                    <span className="material-symbols-outlined mb-xs">
+                      {value === "Low" ? "sentiment_dissatisfied" : value === "High" ? "sentiment_very_satisfied" : "sentiment_satisfied"}
+                    </span>
+                    <span className="text-sm">{value}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant rotate-1">
               <div className="flex items-center gap-sm mb-md">
-                <span className="material-symbols-outlined text-primary">battery_charging_80</span>
-                <h3 className="font-headline-md text-headline-md">2. Energy Level?</h3>
+                <span className="material-symbols-outlined text-primary">psychology</span>
+                <h3 className="font-headline-md text-headline-md">Study Mode</h3>
               </div>
-              <div className="grid grid-cols-3 gap-sm">
-                <button className="p-sm border-2 border-surface-variant rounded-lg font-bold hover:border-primary hover:bg-primary-container/30 transition-all flex flex-col items-center">
-                  <span className="material-symbols-outlined mb-xs">sentiment_dissatisfied</span>
-                  <span className="text-sm">Low</span>
-                </button>
-                <button className="p-sm border-2 border-primary bg-primary-container rounded-lg font-bold transition-all flex flex-col items-center hover-squish">
-                  <span className="material-symbols-outlined mb-xs">sentiment_satisfied</span>
-                  <span className="text-sm">Medium</span>
-                </button>
-                <button className="p-sm border-2 border-surface-variant rounded-lg font-bold hover:border-primary hover:bg-primary-container/30 transition-all flex flex-col items-center">
-                  <span className="material-symbols-outlined mb-xs">sentiment_very_satisfied</span>
-                  <span className="text-sm">High</span>
-                </button>
+              <div className="space-y-sm">
+                {modes.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`w-full flex items-center justify-between p-md border-2 rounded-lg transition-all ${
+                      mode === value ? "border-primary bg-primary-container hover-squish" : "border-surface-variant hover:bg-primary-container/10"
+                    }`}
+                    onClick={() => setMode(value)}
+                  >
+                    <span className="font-bold">{value}</span>
+                    <span className="material-symbols-outlined text-primary">
+                      {mode === value ? "check_circle" : "radio_button_unchecked"}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="sticky-note bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant -rotate-1">
               <div className="flex items-center gap-sm mb-md">
-                <span className="material-symbols-outlined text-primary">psychology</span>
-                <h3 className="font-headline-md text-headline-md">3. Study Mode?</h3>
+                <span className="material-symbols-outlined text-primary">workspace_premium</span>
+                <h3 className="font-headline-md text-headline-md">Target outcome</h3>
               </div>
-              <div className="space-y-sm">
-                <button className="w-full flex items-center justify-between p-md border-2 border-surface-variant rounded-lg hover:bg-primary-container/10 transition-all">
-                  <div className="flex items-center gap-md">
-                    <div className="w-10 h-10 rounded-full bg-secondary-container flex items-center justify-center">
-                      <span className="material-symbols-outlined text-on-secondary-container">timer</span>
-                    </div>
-                    <div className="text-left">
-                      <p className="font-bold">Pomodoro</p>
-                      <p className="text-xs text-on-surface-variant">Focus/Break cycles</p>
-                    </div>
-                  </div>
-                  <span className="material-symbols-outlined text-surface-variant">check_circle</span>
-                </button>
-                <button className="w-full flex items-center justify-between p-md border-2 border-primary bg-primary-container rounded-lg transition-all hover-squish">
-                  <div className="flex items-center gap-md">
-                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
-                      <span className="material-symbols-outlined text-on-primary">waves</span>
-                    </div>
-                    <div className="text-left">
-                      <p className="font-bold text-on-primary-container">Flow State</p>
-                      <p className="text-xs text-on-surface-variant">Gentle transitions</p>
-                    </div>
-                  </div>
-                  <span className="material-symbols-outlined text-primary">check_circle</span>
-                </button>
+              <div className="flex flex-wrap gap-sm">
+                {outcomes.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`px-md py-xs rounded-full font-label-md text-label-md border-2 ${
+                      targetOutcome === value ? "bg-primary text-on-primary border-primary" : "bg-white border-surface-variant"
+                    }`}
+                    onClick={() => setTargetOutcome(value)}
+                  >
+                    {value}
+                  </button>
+                ))}
               </div>
+              <button
+                type="button"
+                className="mt-md bubbly-button w-full bg-primary text-on-primary font-bold py-md rounded-lg flex items-center justify-center gap-sm shadow-lg disabled:opacity-60"
+                onClick={generateSession}
+                disabled={isCreatingSession || !selectedAssignment}
+              >
+                <span className="material-symbols-outlined">auto_awesome</span>
+                {isCreatingSession ? "Generating..." : "Generate Canvas-specific plan"}
+              </button>
             </div>
           </div>
 
-          {/* Session Output & Timer */}
           <div className="col-span-12 lg:col-span-7 space-y-gutter">
-            {/* Progress Section */}
             <div className="bg-surface-container-low border-2 border-outline-variant p-lg rounded-lg bubbly-shadow flex flex-col items-center relative overflow-hidden">
               <div className="absolute -top-4 -right-4 opacity-20 transform rotate-12">
                 <span className="material-symbols-outlined text-[120px] text-primary">temp_preferences_custom</span>
               </div>
               <div className="relative w-64 h-64 mb-lg">
                 <svg className="w-full h-full transform -rotate-90">
-                  <circle className="text-surface-variant" cx="128" cy="128" fill="transparent" r="110" stroke="currentColor" strokeWidth="12"></circle>
-                  <circle className="text-primary" cx="128" cy="128" fill="transparent" r="110" stroke="currentColor" strokeDasharray="691" strokeDashoffset="172" strokeLinecap="round" strokeWidth="12"></circle>
+                  <circle className="text-surface-variant" cx="128" cy="128" fill="transparent" r="110" stroke="currentColor" strokeWidth="12" />
+                  <circle
+                    className="text-primary"
+                    cx="128"
+                    cy="128"
+                    fill="transparent"
+                    r="110"
+                    stroke="currentColor"
+                    strokeDasharray="691"
+                    strokeDashoffset={Math.max(0, 691 - progress)}
+                    strokeLinecap="round"
+                    strokeWidth="12"
+                  />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-5xl font-display-lg text-primary">50:00</span>
-                  <span className="text-sm font-bold text-on-surface-variant uppercase tracking-widest">Focus Time</span>
-                </div>
-              </div>
-              
-              <div className="w-full bg-white rounded-lg border-2 border-surface-variant p-md mb-md">
-                <div className="flex items-center justify-between mb-sm">
-                  <span className="font-bold text-primary">Today's Session Plan</span>
-                  <span className="text-xs font-bold text-on-surface-variant px-sm py-1 bg-surface-container rounded-full">Classic Flow</span>
-                </div>
-                <div className="space-y-sm">
-                  <div className="flex items-center gap-md p-sm bg-primary-container rounded-lg border border-primary/20">
-                    <span className="font-bold text-primary w-12">25m</span>
-                    <span className="material-symbols-outlined text-primary">menu_book</span>
-                    <span className="flex-1 font-medium">Deep Focus: Reading & Notes</span>
-                  </div>
-                  <div className="flex items-center gap-md p-sm bg-secondary-container rounded-lg border border-secondary/20">
-                    <span className="font-bold text-secondary w-12">5m</span>
-                    <span className="material-symbols-outlined text-secondary">celebration</span>
-                    <span className="flex-1 font-medium">Dance Break / Hydration</span>
-                  </div>
-                  <div className="flex items-center gap-md p-sm border border-surface-variant rounded-lg opacity-60">
-                    <span className="font-bold w-12">20m</span>
-                    <span className="material-symbols-outlined">edit</span>
-                    <span className="flex-1 font-medium">Practice Problems</span>
-                  </div>
+                  <span className="text-5xl font-display-lg text-primary">{minutesToClock(secondsLeft)}</span>
+                  <span className="text-sm font-bold text-on-surface-variant uppercase tracking-widest">
+                    {running ? "Focus Time" : "Ready"}
+                  </span>
                 </div>
               </div>
 
-              <button className="bubbly-button w-full bg-primary text-on-primary font-bold py-md rounded-lg text-lg flex items-center justify-center gap-sm shadow-lg">
-                <span className="material-symbols-outlined">play_circle</span> Start Focused Session
-              </button>
+              <div className="w-full bg-white rounded-lg border-2 border-surface-variant p-md mb-md">
+                <div className="flex items-center justify-between mb-sm gap-sm">
+                  <span className="font-bold text-primary line-clamp-1">{plan.title}</span>
+                  <span className="text-xs font-bold text-on-surface-variant px-sm py-1 bg-surface-container rounded-full">
+                    {activeSession ? activeSession.mode : mode}
+                  </span>
+                </div>
+                <p className="font-body-md text-on-surface-variant mb-md line-clamp-3">
+                  {compactText(plan.assignmentBrief || selectedAssignment?.description, "Generate a plan to pull rubric and file context into this session.")}
+                </p>
+                <div className="space-y-sm">
+                  {plan.blocks.slice(0, 5).map((block, index) => (
+                    <div
+                      key={`${block.name}-${index}`}
+                      className={`flex items-start gap-md p-sm rounded-lg border ${
+                        index === 0 ? "bg-primary-container border-primary/20" : "bg-white border-surface-variant"
+                      }`}
+                    >
+                      <span className="font-bold text-primary w-12">{block.minutes}m</span>
+                      <span className="material-symbols-outlined text-primary">{index === 0 ? "menu_book" : "edit"}</span>
+                      <div className="flex-1">
+                        <p className="font-medium">{block.name}</p>
+                        <p className="text-sm text-on-surface-variant">{block.tasks[0] || block.goal || "Focus task"}</p>
+                        {block.breakMinutes ? (
+                          <p className="text-xs text-secondary mt-xs">Break: {block.breakMinutes}m after this block</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-sm w-full">
+                <button
+                  type="button"
+                  className="bubbly-button flex-1 bg-primary text-on-primary font-bold py-md rounded-lg text-lg flex items-center justify-center gap-sm shadow-lg"
+                  onClick={() => setTimerState({ ...timer, running: !running })}
+                >
+                  <span className="material-symbols-outlined">{running ? "pause_circle" : "play_circle"}</span>
+                  {running ? "Pause Session" : "Start Focused Session"}
+                </button>
+                <button
+                  type="button"
+                  className="bubbly-button bg-surface-container text-on-surface-variant border-2 border-surface-variant font-bold px-md rounded-lg"
+                  onClick={() => {
+                    setTimerState({ key: timerKey, secondsLeft: totalSeconds, running: false });
+                  }}
+                >
+                  <span className="material-symbols-outlined">restart_alt</span>
+                </button>
+              </div>
             </div>
 
-            {/* Task Checklist */}
             <div className="bg-surface-container-highest p-md rounded-lg border-2 border-primary-fixed-dim">
               <div className="flex items-center justify-between mb-md">
                 <div className="flex items-center gap-sm">
                   <span className="material-symbols-outlined text-primary">checklist</span>
                   <h3 className="font-headline-md text-headline-md">Session Milestones</h3>
                 </div>
-                <span className="text-xs bg-primary text-on-primary px-sm py-1 rounded-full">0/4 Completed</span>
+                <span className="text-xs bg-primary text-on-primary px-sm py-1 rounded-full">
+                  {completedCount}/{checklist.length} Completed
+                </span>
               </div>
               <div className="space-y-sm">
-                <div className="flex items-center gap-md bg-white p-md rounded-lg border-2 border-transparent hover:border-primary-fixed transition-all cursor-pointer">
-                  <div className="w-6 h-6 rounded-md border-2 border-outline flex items-center justify-center"></div>
-                  <span className="flex-1 text-on-surface">Review Chapter 4 molecular structures</span>
-                  <span className="material-symbols-outlined text-surface-variant">star</span>
-                </div>
-                <div className="flex items-center gap-md bg-white p-md rounded-lg border-2 border-transparent hover:border-primary-fixed transition-all cursor-pointer">
-                  <div className="w-6 h-6 rounded-md border-2 border-outline flex items-center justify-center"></div>
-                  <span className="flex-1 text-on-surface">Practice balancing reaction equations</span>
-                  <span className="material-symbols-outlined text-surface-variant">star</span>
-                </div>
+                {checklist.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className="w-full flex items-center gap-md bg-white p-md rounded-lg border-2 border-transparent hover:border-primary-fixed transition-all cursor-pointer text-left"
+                    onClick={() => toggleChecklist(item)}
+                  >
+                    <span
+                      className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${
+                        completedMap[item] ? "bg-primary border-primary text-on-primary" : "border-outline"
+                      }`}
+                    >
+                      {completedMap[item] ? <span className="material-symbols-outlined text-[18px]">check</span> : null}
+                    </span>
+                    <span className="flex-1 text-on-surface">{item}</span>
+                    <span className="material-symbols-outlined text-surface-variant">star</span>
+                  </button>
+                ))}
               </div>
             </div>
           </div>

@@ -4,11 +4,19 @@ import { redactSecret } from "@/lib/utils";
 type Fetcher = typeof fetch;
 
 function normalizeAccessToken(token: string) {
-  return token
+  let normalized = token
     .trim()
     .replace(/^Bearer\s+/i, "")
-    .replace(/^["']|["']$/g, "")
-    .replace(/\s+/g, "");
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
+
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+
+  return normalized
+    .replace(/[\u0000-\u001f\u007f\s]+/g, "")
+    .replace(/[^\x21-\x7e]/g, "");
 }
 
 export type CanvasCourse = {
