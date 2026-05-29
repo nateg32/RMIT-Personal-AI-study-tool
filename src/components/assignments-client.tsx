@@ -61,7 +61,7 @@ export function AssignmentsClient({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/85 p-3 shadow-sm backdrop-blur sm:flex-row">
+      <div className="flex flex-col gap-3 rounded-lg border-2 border-surface-variant bg-surface-container/80 p-3 bubbly-shadow backdrop-blur sm:flex-row">
         <AnimatedGlowingSearchBar
           placeholder="Search assignments"
           value={query}
@@ -69,7 +69,7 @@ export function AssignmentsClient({
           wrapperClassName="sm:flex-1"
         />
         <select
-          className="h-11 rounded-md border border-border bg-card px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+          className="h-12 rounded-full border-2 border-surface-variant bg-card px-4 text-sm font-bold outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
           value={status}
           onChange={(event) => setStatus(event.target.value)}
         >
@@ -94,7 +94,7 @@ export function AssignmentsClient({
       </div>
 
       {selected ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 backdrop-blur-sm">
           <Card className="max-h-[90vh] w-full max-w-2xl overflow-auto">
             <CardHeader className="flex flex-row items-start justify-between gap-4">
               <div>
@@ -116,7 +116,7 @@ export function AssignmentsClient({
               >
                 <label className="space-y-2 text-sm font-medium">
                   <span>How long?</span>
-                  <select name="durationMinutes" className="h-10 w-full rounded-md border border-border bg-card px-3">
+                  <select name="durationMinutes" className="h-10 w-full rounded-full border-2 border-border bg-card px-3">
                     <option value="30">30 min</option>
                     <option value="60">1 hour</option>
                     <option value="90">90 min</option>
@@ -125,7 +125,7 @@ export function AssignmentsClient({
                 </label>
                 <label className="space-y-2 text-sm font-medium">
                   <span>Mode</span>
-                  <select name="mode" className="h-10 w-full rounded-md border border-border bg-card px-3">
+                  <select name="mode" className="h-10 w-full rounded-full border-2 border-border bg-card px-3">
                     <option>Understand task</option>
                     <option>Plan assignment</option>
                     <option>Write draft</option>
@@ -135,7 +135,7 @@ export function AssignmentsClient({
                 </label>
                 <label className="space-y-2 text-sm font-medium">
                   <span>Energy</span>
-                  <select name="energyLevel" className="h-10 w-full rounded-md border border-border bg-card px-3">
+                  <select name="energyLevel" className="h-10 w-full rounded-full border-2 border-border bg-card px-3">
                     <option>Low</option>
                     <option>Medium</option>
                     <option>High</option>
@@ -143,7 +143,7 @@ export function AssignmentsClient({
                 </label>
                 <label className="space-y-2 text-sm font-medium">
                   <span>Target</span>
-                  <select name="targetOutcome" className="h-10 w-full rounded-md border border-border bg-card px-3">
+                  <select name="targetOutcome" className="h-10 w-full rounded-full border-2 border-border bg-card px-3">
                     <option>Just complete</option>
                     <option>Credit</option>
                     <option>Distinction</option>
@@ -162,7 +162,7 @@ export function AssignmentsClient({
                 <div className="mt-6 space-y-4">
                   <h3 className="text-lg font-semibold">{plan.title}</h3>
                   {plan.assignmentBrief ? (
-                    <p className="rounded-lg border border-border bg-background/70 p-3 text-sm text-muted">
+                    <p className="rounded-lg border-2 border-surface-variant bg-surface-container/70 p-3 text-sm text-muted">
                       {plan.assignmentBrief}
                     </p>
                   ) : null}
@@ -176,7 +176,7 @@ export function AssignmentsClient({
                     </div>
                   ) : null}
                   {plan.blocks.map((block) => (
-                    <div key={block.name} className="rounded-lg border border-border p-4">
+                    <div key={block.name} className="rounded-lg border-2 border-surface-variant bg-surface-container/60 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium">{block.name}</p>
                         <Badge tone="medium">{block.minutes} min</Badge>

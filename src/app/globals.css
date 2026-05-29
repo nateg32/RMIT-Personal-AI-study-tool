@@ -2,16 +2,26 @@
 @import "tw-animate-css";
 
 :root {
-  --background: #f7f8fa;
-  --foreground: #17202a;
+  --background: #fbf9f1;
+  --foreground: #1b1c17;
   --card: #ffffff;
-  --muted: #667085;
-  --border: #dde3ea;
-  --primary: #0f8f68;
+  --muted: #5f675b;
+  --border: #d9ddd0;
+  --primary: #4d653d;
   --primary-foreground: #ffffff;
-  --danger: #c23b3b;
-  --warning: #b87912;
-  --info: #3559c7;
+  --danger: #ba1a1a;
+  --warning: #9a6410;
+  --info: #3c627c;
+  --surface: #fbf9f1;
+  --surface-container: #f0eee6;
+  --surface-container-low: #f5f4ec;
+  --surface-variant: #e4e3db;
+  --primary-container: #d4f1be;
+  --secondary: #3c627c;
+  --secondary-container: #d7ebf8;
+  --tertiary: #77583e;
+  --tertiary-container: #ffe3ce;
+  --lavender-note: #e2d5f3;
   --gradient-angle: 0deg;
 }
 
@@ -26,34 +36,64 @@
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-surface: var(--surface);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-variant: var(--surface-variant);
+  --color-primary-container: var(--primary-container);
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-tertiary: var(--tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-lavender-note: var(--lavender-note);
   --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #101418;
-    --foreground: #edf2f7;
-    --card: #171d23;
-    --muted: #9aa7b7;
-    --border: #2a343f;
-    --primary: #37b58d;
+    --background: #11140f;
+    --foreground: #f3f1e9;
+    --card: #191d16;
+    --muted: #b8c3b1;
+    --border: #33382f;
+    --primary: #b3cf9e;
     --danger: #f17070;
     --warning: #e2a13b;
-    --info: #7d96f3;
+    --info: #a5cbe9;
+    --surface: #11140f;
+    --surface-container: #1f241b;
+    --surface-container-low: #171b14;
+    --surface-variant: #33382f;
+    --primary-container: #25371d;
+    --secondary: #a5cbe9;
+    --secondary-container: #183247;
+    --tertiary: #e7bf9f;
+    --tertiary-container: #422b18;
+    --lavender-note: #34283f;
   }
 }
 
 .dark {
-  --background: #101418;
-  --foreground: #edf2f7;
-  --card: #171d23;
-  --muted: #9aa7b7;
-  --border: #2a343f;
-  --primary: #37b58d;
+  --background: #11140f;
+  --foreground: #f3f1e9;
+  --card: #191d16;
+  --muted: #b8c3b1;
+  --border: #33382f;
+  --primary: #b3cf9e;
   --danger: #f17070;
   --warning: #e2a13b;
-  --info: #7d96f3;
+  --info: #a5cbe9;
+  --surface: #11140f;
+  --surface-container: #1f241b;
+  --surface-container-low: #171b14;
+  --surface-variant: #33382f;
+  --primary-container: #25371d;
+  --secondary: #a5cbe9;
+  --secondary-container: #183247;
+  --tertiary: #e7bf9f;
+  --tertiary-container: #422b18;
+  --lavender-note: #34283f;
 }
 
 body {
@@ -77,6 +117,69 @@ body {
   }
   to {
     --gradient-angle: 360deg;
+  }
+}
+
+@layer utilities {
+  .bubbly-shadow {
+    box-shadow: 0 10px 30px rgba(74, 69, 62, 0.08);
+  }
+
+  .soft-panel {
+    border: 2px solid var(--surface-variant);
+    background: color-mix(in srgb, var(--card) 82%, var(--surface-container));
+    box-shadow: 0 10px 30px rgba(74, 69, 62, 0.06);
+  }
+
+  .sticky-note {
+    border: 2px solid var(--surface-variant);
+    box-shadow: 0 10px 30px rgba(74, 69, 62, 0.08);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+
+  .sticky-note:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 38px rgba(74, 69, 62, 0.12);
+  }
+
+  .sticky-note-mint {
+    background: var(--primary-container);
+    border-color: color-mix(in srgb, var(--primary) 22%, var(--primary-container));
+  }
+
+  .sticky-note-peach {
+    background: var(--tertiary-container);
+    border-color: color-mix(in srgb, var(--tertiary) 22%, var(--tertiary-container));
+  }
+
+  .sticky-note-lavender {
+    background: var(--lavender-note);
+    border-color: color-mix(in srgb, var(--secondary) 22%, var(--lavender-note));
+  }
+
+  .hover-squish {
+    transition: transform 160ms ease, filter 160ms ease;
+  }
+
+  .hover-squish:hover {
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  .hover-squish:active {
+    transform: scale(0.97);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 999px;
   }
 }
 

@@ -137,7 +137,7 @@ export function ActionSearchBar({
           onFocus={() => setIsFocused(true)}
           onBlur={() => window.setTimeout(() => setIsFocused(false), 140)}
           placeholder={placeholder}
-          className="h-11 rounded-lg border-border bg-card/90 pl-10 pr-10 shadow-sm backdrop-blur"
+          className="h-14 rounded-full border-2 border-surface-variant bg-card/90 pl-12 pr-10 text-base shadow-sm backdrop-blur"
         />
         <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
           <Search className="h-4 w-4" />
@@ -175,7 +175,7 @@ export function ActionSearchBar({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.16 }}
-            className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-lg border border-border bg-card/95 shadow-xl backdrop-blur"
+            className="absolute left-0 right-0 top-16 z-30 overflow-hidden rounded-lg border-2 border-surface-variant bg-card/95 shadow-xl backdrop-blur"
           >
             <ul className="max-h-80 overflow-auto p-1">
               {result.length ? (
@@ -183,12 +183,12 @@ export function ActionSearchBar({
                   <li key={action.id}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition hover:bg-background"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-surface-container"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => onAction?.(action)}
                     >
                       <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface-container">
                           {action.icon}
                         </span>
                         <span className="min-w-0">

@@ -1,4 +1,4 @@
-import { ExternalLink, Sparkles } from "lucide-react";
+import { Clock3, ExternalLink, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,15 +19,15 @@ export function AssignmentCard({
   const submitted = isSubmitted(assignment);
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-muted">
+            <p className="text-sm font-bold text-primary">
               {assignment.courseName}
-              {assignment.courseCode ? ` · ${assignment.courseCode}` : ""}
+              {assignment.courseCode ? ` - ${assignment.courseCode}` : ""}
             </p>
-            <CardTitle className="mt-1">{assignment.name}</CardTitle>
+            <CardTitle className="mt-1 text-2xl">{assignment.name}</CardTitle>
           </div>
           <Badge tone={urgency.label}>{urgency.label}</Badge>
         </div>
@@ -44,12 +44,15 @@ export function AssignmentCard({
           </div>
           <div>
             <p className="text-muted">Estimated time</p>
-            <p className="font-medium">{urgency.estimatedTime}</p>
+            <p className="flex items-center gap-1 font-medium">
+              <Clock3 className="h-4 w-4 text-primary" />
+              {urgency.estimatedTime}
+            </p>
           </div>
         </div>
         <p className="text-sm text-muted">
-          {formatRelativeDue(assignment.dueAt, timezone)} · {urgency.reason}
-          {assignment.pointsPossible ? ` · ${assignment.pointsPossible} pts` : ""}
+          {formatRelativeDue(assignment.dueAt, timezone)} - {urgency.reason}
+          {assignment.pointsPossible ? ` - ${assignment.pointsPossible} pts` : ""}
         </p>
         <div className="flex flex-wrap gap-2">
           {assignment.htmlUrl ? (
