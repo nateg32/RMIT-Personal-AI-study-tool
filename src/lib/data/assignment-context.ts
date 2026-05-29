@@ -366,6 +366,48 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
   return contexts.filter((context): context is AssignmentContextPack => Boolean(context));
 }
 
+export async function getChatManualMaterialsForUser(user: User, message: string) {
+  if (isDemoUser(user) || !env.DATABASE_URL) {
+    return demoDashboard.files
+      .filter((file) => file.source === "manual_upload")
+      .map((file) => `Manual upload - ${file.courseName}: ${file.name}${file.excerpt ? ` - Indexed excerpt: ${file.excerpt}` : ""}`);
+  }
+
+  const db = getDb();
+  const preferences = await getDashboardPreferences(user.id);
+  const snapshots = await db.syncSnapshot.findMany({
+    where: { userId: user.id, type: "manual_upload" },
+    select: { metadata: true },
+    orderBy: [{ createdAt: "desc" }],
+    take: 250,
+  });
+  const materials = filterManualMaterials(
+    snapshots
+      .map((snapshot) => parseManualMaterial(snapshot.metadata))
+      .filter((file): file is ManualMaterialMetadata => Boolean(file)),
+    preferences,
+  );
+  const messageWords = words(message);
+
+  return materials
+    .map((file) => {
+      const indexedText = [file.notes, file.extractedText].filter(Boolean).join("\n\n");
+      return {
+        score:
+          scoreText(
+            messageWords,
+            `${file.name} ${file.courseName || ""} ${file.assignmentName || ""} ${file.contentType || ""} ${indexedText}`,
+          ) + (message.toLowerCase().includes(file.name.toLowerCase()) ? 20 : 0),
+        text: `Manual upload - ${file.courseName || "Manual library"}${
+          file.assignmentName ? ` / ${file.assignmentName}` : ""
+        }: ${file.name}${indexedText ? ` - Indexed excerpt: ${excerpt(indexedText)}` : " - No indexed text stored."}`,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, messageWords.size > 0 ? 10 : 6)
+    .map((item) => item.text);
+}
+
 export async function getCustomFocusContextForUser(
   user: User,
   input: { title?: string | null; focus?: string | null },

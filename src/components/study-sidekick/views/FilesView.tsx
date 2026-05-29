@@ -129,7 +129,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
             <h2 className="font-headline-md text-headline-md text-primary">Upload study material</h2>
           </div>
           <p className="font-body-md text-body-md text-on-surface-variant mb-md max-w-3xl">
-            Add assignment briefs, lecture notes, rubric text, or slides when Canvas file syncing is slow. Text files are indexed automatically; for PDFs or slides, paste the key brief/rubric notes so AI can use them.
+            Add assignment briefs, lecture notes, rubric text, or slides when Canvas file syncing is slow. DOCX and text files are indexed automatically; for PDFs, slides, or images, paste the key brief/rubric notes so AI can use them.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
             <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">

@@ -314,6 +314,7 @@ When a user asks about a specific assignment, use the matching assignment contex
 - mention rubric criteria if available
 - point to relevant files/modules/slides/resources by title
 - name missing context instead of filling gaps
+When a user asks about an uploaded file or material by title, use the matching "Files and manual materials" indexed excerpt directly. Do not say you cannot read the file if an indexed excerpt is present.
 Keep the answer practical and specific.
 
 Student: ${input.name}

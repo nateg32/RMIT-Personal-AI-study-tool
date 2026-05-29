@@ -20,6 +20,7 @@ const textContentTypes = new Set([
 ]);
 
 const textExtensions = new Set([".txt", ".md", ".markdown", ".csv", ".json", ".html", ".htm", ".xml", ".log"]);
+const docxContentTypes = new Set(["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]);
 
 export type ManualMaterialMetadata = {
   id: string;
@@ -75,6 +76,11 @@ function isTextLike(file: File) {
   return type.startsWith("text/") || textContentTypes.has(type) || textExtensions.has(extension(file.name));
 }
 
+function isDocx(file: File) {
+  const type = file.type.toLowerCase();
+  return extension(file.name) === ".docx" || docxContentTypes.has(type);
+}
+
 function cleanText(value: string) {
   return stripCanvasHtml(value)
     .replace(/\u0000/g, "")
@@ -82,6 +88,18 @@ function cleanText(value: string) {
     .replace(/\n{4,}/g, "\n\n\n")
     .trim()
     .slice(0, MAX_INDEXED_TEXT);
+}
+
+async function extractIndexedText(file: File) {
+  if (isTextLike(file)) return cleanText(await file.text());
+  if (isDocx(file)) {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({
+      buffer: Buffer.from(await file.arrayBuffer()),
+    });
+    return cleanText(result.value || "");
+  }
+  return null;
 }
 
 export async function createUploadedMaterial({
@@ -129,12 +147,15 @@ export async function createUploadedMaterial({
     resolvedCourseName = course.name;
   }
 
-  const extractedText = file && isTextLike(file) ? cleanText(await file.text()) : null;
+  const extractedText = file ? await extractIndexedText(file) : null;
   const cleanedNotes = notes ? cleanText(notes) : null;
   const name = (file?.name || title || "Manual study material").slice(0, 180);
 
   if (!file && !cleanedNotes) {
     throw new Error("Upload a file or paste notes/brief text to index.");
+  }
+  if (file && !extractedText && !cleanedNotes) {
+    throw new Error("I cannot read that file type yet. Upload .docx, .txt, .md, .html, .csv, or paste the key PDF/slide notes.");
   }
 
   const id = randomUUID();

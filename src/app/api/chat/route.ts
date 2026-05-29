@@ -2,7 +2,7 @@ import { z } from "zod";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { getDashboardData } from "@/lib/data/dashboard";
-import { getChatAssignmentContextsForUser } from "@/lib/data/assignment-context";
+import { getChatAssignmentContextsForUser, getChatManualMaterialsForUser } from "@/lib/data/assignment-context";
 import { chatWithCanvasContext } from "@/lib/ai/gemini";
 import { rateLimit } from "@/lib/rate-limit";
 import type { CanvasAssignmentSummary } from "@/lib/types";
@@ -20,6 +20,15 @@ function uniqueAssignments(assignments: CanvasAssignmentSummary[]) {
   });
 }
 
+function uniqueStrings(items: string[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const user = await requireUser();
@@ -27,7 +36,10 @@ export async function POST(request: Request) {
     if (!limit.ok) return jsonError(new Error("Too many chat requests"), 429);
     const { message } = await parseJson(request, chatSchema);
     const dashboard = await getDashboardData(user);
-    const assignmentContexts = await getChatAssignmentContextsForUser(user, message);
+    const [assignmentContexts, manualMaterials] = await Promise.all([
+      getChatAssignmentContextsForUser(user, message),
+      getChatManualMaterialsForUser(user, message),
+    ]);
     const answer = await chatWithCanvasContext({
       message,
       name: dashboard.userName,
@@ -39,11 +51,14 @@ export async function POST(request: Request) {
         ...dashboard.unsubmitted,
       ]).slice(0, 16),
       announcements: dashboard.announcements.map((item) => `${item.courseName}: ${item.title}`),
-      files: dashboard.files.map((item) =>
-        `${item.source === "manual_upload" ? "Manual upload" : "Canvas file"} - ${item.courseName}${
-          item.assignmentName ? ` / ${item.assignmentName}` : ""
-        }: ${item.name}${item.excerpt ? ` - ${item.excerpt}` : ""}`,
-      ),
+      files: uniqueStrings([
+        ...manualMaterials,
+        ...dashboard.files.map((item) =>
+          `${item.source === "manual_upload" ? "Manual upload" : "Canvas file"} - ${item.courseName}${
+            item.assignmentName ? ` / ${item.assignmentName}` : ""
+          }: ${item.name}${item.excerpt ? ` - ${item.excerpt}` : ""}`,
+        ),
+      ]).slice(0, 18),
       assignmentContexts,
     });
     return jsonOk({ ...answer, lastSyncAt: dashboard.lastSyncAt });
