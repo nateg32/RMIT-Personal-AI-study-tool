@@ -3,12 +3,21 @@
 import { useMemo, useState } from "react";
 import { personalGreeting } from "@/lib/display";
 import ViewHeader from "../components/ViewHeader";
-import type { AssignmentSummary, CourseDashboardSummary, DailyBrief, DashboardSummary, StudySidekickActions } from "../types";
+import type {
+  AssignmentSummary,
+  CourseDashboardSummary,
+  DailyBrief,
+  DashboardSummary,
+  StudySessionRecord,
+  StudySidekickActions,
+} from "../types";
 import { assignmentTypeLabel, estimateEffort, formatRelative, riskTone, statusLabel } from "../lib/client-utils";
+import { buildFocusStats } from "../lib/streak";
 
 type DashboardViewProps = {
   dashboard: DashboardSummary;
   dailyBrief: DailyBrief | null;
+  sessions: StudySessionRecord[];
   actions: StudySidekickActions;
   onCreateSession: (assignmentId: string) => void;
 };
@@ -109,7 +118,7 @@ function SubjectCard({ course }: { course: CourseDashboardSummary }) {
   );
 }
 
-export default function DashboardView({ dashboard, dailyBrief, actions, onCreateSession }: DashboardViewProps) {
+export default function DashboardView({ dashboard, dailyBrief, sessions, actions, onCreateSession }: DashboardViewProps) {
   const [search, setSearch] = useState("");
   const greeting = useMemo(
     () => personalGreeting(dashboard.userName, dashboard.timezone),
@@ -131,6 +140,10 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
   const nextDeadline = missionAssignments[0];
   const briefJson = dailyBrief?.generatedJson;
   const courseBreakdown = dashboard.courseBreakdown || [];
+  const focusStats = useMemo(
+    () => buildFocusStats(sessions, dashboard.timezone),
+    [dashboard.timezone, sessions],
+  );
   const briefingSummary =
     dashboard.priorityItems?.length
       ? dashboard.todayMission[0]
@@ -235,27 +248,47 @@ export default function DashboardView({ dashboard, dailyBrief, actions, onCreate
           </div>
 
           <div className="lg:col-span-4 flex flex-col gap-sm">
-            <div className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish cursor-default">
+            <button
+              type="button"
+              className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish text-left"
+              onClick={() => actions.onNavigate("risk")}
+              aria-label={`Open risk level details. Current risk is ${dashboard.riskLevel}.`}
+            >
               <div>
                 <p className="font-label-sm text-label-sm text-on-surface-variant uppercase">Risk Level</p>
                 <p className="font-headline-md text-headline-md font-bold capitalize">{dashboard.riskLevel}</p>
               </div>
               <span className="material-symbols-outlined text-primary text-[40px]">check_circle</span>
-            </div>
-            <div className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish cursor-default">
+            </button>
+            <button
+              type="button"
+              className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish text-left"
+              onClick={() => actions.onNavigate("assignments")}
+              aria-label={`Open unsubmitted assignments. ${dashboard.unsubmitted.length} tasks need attention.`}
+            >
               <div>
                 <p className="font-label-sm text-label-sm text-on-surface-variant uppercase">Unsubmitted</p>
                 <p className="font-headline-md text-headline-md font-bold">{dashboard.unsubmitted.length} Tasks</p>
               </div>
               <span className="material-symbols-outlined text-error text-[40px]">pending_actions</span>
-            </div>
-            <div className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish cursor-default">
+            </button>
+            <button
+              type="button"
+              className="flex-1 bg-surface-container-low border-2 border-surface-variant p-md rounded-lg bubbly-shadow flex items-center justify-between hover-squish text-left"
+              onClick={() => actions.onNavigate("streak")}
+              aria-label={`Open focus streak details. Current streak is ${focusStats.protectedStreak} days.`}
+            >
               <div>
                 <p className="font-label-sm text-label-sm text-on-surface-variant uppercase">Focus Streak</p>
-                <p className="font-headline-md text-headline-md font-bold">3 Days</p>
+                <p className="font-headline-md text-headline-md font-bold">
+                  {focusStats.protectedStreak} {focusStats.protectedStreak === 1 ? "Day" : "Days"}
+                </p>
+                {focusStats.streakAtRisk ? (
+                  <p className="font-label-sm text-label-sm text-tertiary">Protect it today</p>
+                ) : null}
               </div>
               <span className="material-symbols-outlined text-secondary text-[40px]">local_fire_department</span>
-            </div>
+            </button>
           </div>
         </div>
 

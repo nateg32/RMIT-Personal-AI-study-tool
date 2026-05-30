@@ -122,6 +122,9 @@ export type StudyPlan = {
   title: string;
   durationMinutes: number;
   riskLevel: RiskLevel;
+  contextConfidence?: "high" | "medium" | "low";
+  contextSummary?: string[];
+  needsUserContext?: boolean;
   assignmentBrief?: string;
   rubricFocus?: string[];
   blocks: StudyBlock[];
@@ -146,6 +149,7 @@ export type StudySessionRecord = {
   generatedPlanJson: StudyPlan;
   status: string;
   createdAt: string;
+  updatedAt?: string;
   assignment?: {
     id: string;
     name: string;

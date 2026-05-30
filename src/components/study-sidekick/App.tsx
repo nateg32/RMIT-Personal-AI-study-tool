@@ -9,8 +9,11 @@ import CoursesView from "./views/CoursesView";
 import AnnouncementsView from "./views/AnnouncementsView";
 import FilesView from "./views/FilesView";
 import StudySessionsView from "./views/StudySessionsView";
+import RiskView from "./views/RiskView";
+import FocusStreakView from "./views/FocusStreakView";
 import AiChatView, { type ChatMessage } from "./views/AiChatView";
 import SettingsView from "./views/SettingsView";
+import SupportView from "./views/SupportView";
 import type {
   AnnouncementSummary,
   AssignmentSummary,
@@ -121,7 +124,7 @@ function welcomeMessage(): ChatMessage {
     role: "assistant",
     createdAt: Date.now(),
     content:
-      "Hey Nathaniel. Ask me what is due, what changed, or which assignment needs a battle plan. I will stay grounded in Canvas and your uploaded study materials.",
+      "Hey Nathaniel. Ask me what is due, what changed, or ask me to create a study session. I can use safe study tools, but Canvas stays read-only.",
   };
 }
 
@@ -536,15 +539,23 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         const payload = await apiJson<{
           answer: string;
           lastSyncAt?: string | null;
-          provider?: "gemini" | "fallback";
+          provider?: "gemini" | "fallback" | "agent";
           model?: string | null;
           reason?: string | null;
+          agentEvents?: Array<{
+            type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
+            label: string;
+            assignmentId?: string | null;
+            view?: ViewType;
+          }>;
         }>("/api/chat", {
           method: "POST",
           body: JSON.stringify({ message: trimmed }),
         });
         setChatProviderStatus(
-          payload.provider === "gemini"
+          payload.provider === "agent"
+            ? "Using Study Agent tools"
+            : payload.provider === "gemini"
             ? `Using Gemini ${payload.model || ""}`.trim()
             : payload.reason
               ? `Using grounded fallback: ${payload.reason}`
@@ -562,6 +573,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
               : item,
           ),
         );
+        if (payload.agentEvents?.length) {
+          const firstEvent = payload.agentEvents[0];
+          setActionMessage(firstEvent.label);
+          if (firstEvent.assignmentId) setSelectedAssignmentId(firstEvent.assignmentId);
+          if (firstEvent.view === "sessions") setActiveView("sessions");
+          void refreshData().catch((error) => {
+            setActionMessage(error instanceof Error ? error.message : "Agent action completed, but refresh failed.");
+          });
+        }
       } catch (error) {
         setChatMessages((current) =>
           current.map((item) =>
@@ -575,7 +595,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         setIsChatSending(false);
       }
     },
-    [],
+    [refreshData],
   );
 
   const logOut = useCallback(async () => {
@@ -630,7 +650,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         activeView={activeView}
         onNavigate={setActiveView}
         onStartSession={startSession}
-        onSupport={() => openChat("I need help with the study dashboard.")}
+        onSupport={() => setActiveView("support")}
         onLogout={logOut}
       />
 
@@ -662,6 +682,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
               <DashboardView
                 dashboard={dashboard}
                 dailyBrief={dailyBrief}
+                sessions={studySessions}
                 actions={actions}
                 onCreateSession={(assignmentId) =>
                   createStudySession({
@@ -726,6 +747,31 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 actions={actions}
               />
             )}
+            {activeView === "risk" && (
+              <RiskView
+                assignments={assignments}
+                dashboard={dashboard}
+                actions={actions}
+                isCreatingSession={isCreatingSession}
+                onCreateSession={(assignmentId) =>
+                  createStudySession({
+                    assignmentId,
+                    durationMinutes: 50,
+                    mode: "Plan assignment",
+                    energyLevel: "Medium",
+                    targetOutcome: "Credit",
+                  })
+                }
+              />
+            )}
+            {activeView === "streak" && (
+              <FocusStreakView
+                assignments={assignments}
+                dashboard={dashboard}
+                sessions={studySessions}
+                actions={actions}
+              />
+            )}
             {activeView === "chat" && (
               <AiChatView
                 messages={chatMessages}
@@ -749,6 +795,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 onLogout={logOut}
               />
             )}
+            {activeView === "support" && <SupportView dashboard={dashboard} actions={actions} />}
           </div>
         )}
       </main>

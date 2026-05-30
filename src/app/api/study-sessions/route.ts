@@ -17,9 +17,9 @@ const createStudySessionSchema = z.object({
   customTitle: z.string().trim().min(1).max(180).optional(),
   customFocus: z.string().trim().min(1).max(8_000).optional(),
   durationMinutes: z.number().min(15).max(480),
-  mode: z.string().min(2),
-  energyLevel: z.string().min(2),
-  targetOutcome: z.string().min(2),
+  mode: z.string().min(2).default("Plan assignment"),
+  energyLevel: z.string().min(2).default("Medium"),
+  targetOutcome: z.string().min(2).default("Credit"),
 });
 
 export async function GET() {
@@ -63,6 +63,7 @@ export async function POST(request: Request) {
       energyLevel: input.energyLevel,
       targetOutcome: input.targetOutcome,
       timezone: user.timezone,
+      extraContext: input.customFocus,
     });
 
     if (!isDemoUser(user) && env.DATABASE_URL) {

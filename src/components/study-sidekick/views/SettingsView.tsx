@@ -304,7 +304,7 @@ export default function SettingsView({
               </ul>
             </div>
 
-            <div className="bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md -rotate-1">
+            <div className="straight-panel bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md">
               <div className="flex items-center gap-sm mb-sm">
                 <span className="material-symbols-outlined text-primary">tune</span>
                 <h3 className="font-headline-md text-headline-md text-primary">Dashboard scope</h3>

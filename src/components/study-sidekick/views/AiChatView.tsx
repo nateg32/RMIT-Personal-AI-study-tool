@@ -9,7 +9,7 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   createdAt: number;
-  provider?: "gemini" | "fallback";
+  provider?: "gemini" | "fallback" | "agent";
   model?: string | null;
 };
 
@@ -38,9 +38,15 @@ const suggestions = [
   },
   {
     tag: "PLANNING",
-    prompt: "Make me a 1-hour study plan for my most urgent assignment.",
+    prompt: "Create a 1-hour study session for my most urgent assignment.",
     className: "bg-[#FFEBE6] border-[#FFC7B8] text-[#532D23] rotate-[-0.5deg]",
     icon: "schedule",
+  },
+  {
+    tag: "AGENT",
+    prompt: "What tools can you use for studying?",
+    className: "bg-primary-container border-primary-fixed-dim text-primary",
+    icon: "construction",
   },
 ];
 
@@ -99,13 +105,22 @@ export default function AiChatView({
                 ["Due this week", "event"],
                 ["Unsubmitted work", "pending_actions"],
                 ["Recent announcements", "campaign"],
-                ["Assignment battle plan", "psychology"],
+                ["Create top session", "psychology"],
+                ["Agent tools", "construction"],
               ].map(([label, icon]) => (
                 <button
                   key={label}
                   type="button"
                   className="p-sm rounded-lg hover:bg-primary-container/30 cursor-pointer transition-colors border border-transparent text-left flex items-center gap-sm"
-                  onClick={() => onSend(label === "Assignment battle plan" ? "Create a battle plan for my most urgent assignment." : `Show me ${label.toLowerCase()}.`)}
+                  onClick={() =>
+                    onSend(
+                      label === "Create top session"
+                        ? "Create a 50-minute study session for my most urgent assignment."
+                        : label === "Agent tools"
+                          ? "What tools can you use for studying?"
+                          : `Show me ${label.toLowerCase()}.`,
+                    )
+                  }
                   disabled={isSending}
                 >
                   <span className="material-symbols-outlined text-primary">{icon}</span>
@@ -137,8 +152,8 @@ export default function AiChatView({
           <div className="px-md pt-md">
             <div className="rounded-lg border-2 border-primary-fixed-dim bg-primary-container/25 px-md py-sm flex items-start gap-sm">
               <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">schedule</span>
-              <p className="font-label-md text-label-md text-on-surface-variant">
-                Chats are kept in this browser for 24 hours, then auto-cleared. Sidekick can only answer from synced Canvas data and your uploaded study materials.
+                <p className="font-label-md text-label-md text-on-surface-variant">
+                Chats are kept in this browser for 24 hours, then auto-cleared. Sidekick can answer from Canvas/materials and can run safe study tools when you explicitly ask.
                 {chatProviderStatus ? <span className="block mt-xs text-primary">{chatProviderStatus}</span> : null}
               </p>
             </div>
@@ -159,13 +174,19 @@ export default function AiChatView({
                   className={`p-md bubbly-shadow whitespace-pre-wrap ${
                     message.role === "user"
                       ? "bg-[#FFEBE6] rounded-tl-xl rounded-b-xl border-2 border-[#FFC7B8] max-w-[85%] text-[#532D23]"
-                      : "bg-[#EBE7FF] rounded-tr-xl rounded-b-xl border-2 border-[#D1C4FF] text-[#352D53]"
+                      : message.provider === "agent"
+                        ? "bg-primary-container rounded-tr-xl rounded-b-xl border-2 border-primary-fixed-dim text-primary"
+                        : "bg-[#EBE7FF] rounded-tr-xl rounded-b-xl border-2 border-[#D1C4FF] text-[#352D53]"
                   }`}
                 >
                   <p className="font-body-md text-body-md">{message.content}</p>
                   {message.role === "assistant" && message.provider ? (
                     <p className="mt-sm font-label-sm text-label-sm opacity-70">
-                      {message.provider === "gemini" ? `Gemini${message.model ? ` (${message.model})` : ""}` : "Deterministic fallback"}
+                      {message.provider === "gemini"
+                        ? `Gemini${message.model ? ` (${message.model})` : ""}`
+                        : message.provider === "agent"
+                          ? "Study Agent"
+                          : "Deterministic fallback"}
                     </p>
                   ) : null}
                 </div>

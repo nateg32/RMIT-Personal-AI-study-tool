@@ -5,4 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type ViewType = 'dashboard' | 'assignments' | 'courses' | 'announcements' | 'files' | 'sessions' | 'chat' | 'settings';
+export type ViewType =
+  | "dashboard"
+  | "assignments"
+  | "courses"
+  | "announcements"
+  | "files"
+  | "sessions"
+  | "risk"
+  | "streak"
+  | "chat"
+  | "settings"
+  | "support";

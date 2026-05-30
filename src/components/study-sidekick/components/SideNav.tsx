@@ -68,7 +68,12 @@ export default function SideNav({ activeView, onNavigate, onStartSession, onSupp
           <div className="h-[2px] bg-surface-variant rounded-full mb-md mx-md"></div>
           <button
             type="button"
-            className="w-full flex items-center gap-sm text-on-surface-variant px-md py-sm hover:bg-surface-variant text-left rounded-lg transition-all"
+            className={cn(
+              "w-full flex items-center gap-sm px-md py-sm text-left rounded-lg transition-all",
+              activeView === "support"
+                ? "bg-primary-container text-primary font-bold"
+                : "text-on-surface-variant hover:bg-surface-variant"
+            )}
             onClick={onSupport}
           >
             <span className="material-symbols-outlined">help</span>

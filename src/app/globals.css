@@ -108,12 +108,53 @@ body {
   .sticky-note-mint { background-color: #D4F1BE; border: 2px solid #C4E1AE; }
   .sticky-note-rotate { transform: rotate(-1deg); }
   .sticky-note-rotate-alt { transform: rotate(1deg); }
-  .hover-squish { transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-  .hover-squish:hover { transform: scale(1.05); }
-  .hover-squish:active { transform: scale(0.95); }
-  .bubbly-button { transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
-  .bubbly-button:hover { transform: scale(1.05); }
-  .bubbly-button:active { transform: scale(0.95); }
+  button:not(:disabled),
+  a[role="button"]:not([aria-disabled="true"]) {
+    -webkit-tap-highlight-color: transparent;
+    isolation: isolate;
+    position: relative;
+    transition:
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      box-shadow 0.16s ease,
+      color 0.16s ease,
+      filter 0.16s ease,
+      transform 0.16s ease;
+  }
+
+  button:not(:disabled)::after,
+  a[role="button"]:not([aria-disabled="true"])::after {
+    background: radial-gradient(circle at center, rgba(77, 101, 61, 0.18), transparent 68%);
+    border-radius: inherit;
+    content: "";
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    transform: scale(0.92);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  button:not(:disabled):active::after,
+  a[role="button"]:not([aria-disabled="true"]):active::after {
+    opacity: 1;
+    transform: scale(1);
+    transition-duration: 0.06s;
+  }
+
+  button:not(:disabled):focus-visible,
+  a[role="button"]:not([aria-disabled="true"]):focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    outline-offset: 3px;
+  }
+
+  .hover-squish { transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.16s ease; }
+  .hover-squish:hover { transform: translateY(-1px) scale(1.015); }
+  .hover-squish:active { transform: translateY(1px) scale(0.98); }
+  .bubbly-button { transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.16s ease, filter 0.16s ease; cursor: pointer; }
+  .bubbly-button:hover { transform: translateY(-1px) scale(1.015); box-shadow: 0 10px 24px rgba(74, 69, 62, 0.08); }
+  .bubbly-button:active { transform: translateY(1px) scale(0.98); filter: saturate(1.06); box-shadow: inset 0 0 0 999px rgba(77, 101, 61, 0.08); }
+  .bubbly-button:disabled { cursor: not-allowed; transform: none; box-shadow: none; }
 
   .custom-scrollbar::-webkit-scrollbar { width: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -157,5 +198,45 @@ body {
   .straight-panel:hover {
       transform: none !important;
       box-shadow: 0px 15px 35px rgba(74, 69, 62, 0.1);
+  }
+
+  .soft-status-pill {
+      animation: status-pill-in 0.18s ease-out;
+      box-shadow: 0px 8px 22px rgba(74, 69, 62, 0.06);
+  }
+
+  .status-dot {
+      animation: status-dot-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes status-pill-in {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes status-dot-pulse {
+      0%, 100% { opacity: 0.45; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button:not(:disabled),
+    a[role="button"]:not([aria-disabled="true"]),
+    button:not(:disabled)::after,
+    a[role="button"]:not([aria-disabled="true"])::after,
+    .hover-squish,
+    .bubbly-button,
+    .soft-status-pill,
+    .status-dot {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    .hover-squish:hover,
+    .hover-squish:active,
+    .bubbly-button:hover,
+    .bubbly-button:active {
+      transform: none !important;
+    }
   }
 }

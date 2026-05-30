@@ -36,6 +36,8 @@ cp .env.example .env.local
 - optional `GEMINI_API_KEY`
 - optional `GEMINI_MODEL` defaults to `gemini-3.1-pro-preview`
 - optional local-only `CANVAS_ACCESS_TOKEN`
+- optional `RESEND_API_KEY` for Support Desk tickets
+- optional `SUPPORT_FROM_EMAIL` and `SUPPORT_TO_EMAIL`, defaulting to `Study Sidekick <support@creatorbot.app>` and `support@creatorbot.app`
 
 Generate a 32-byte encryption key:
 

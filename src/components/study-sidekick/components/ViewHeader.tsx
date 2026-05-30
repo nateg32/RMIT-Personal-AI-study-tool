@@ -2,17 +2,15 @@ import type { StudySidekickActions } from "../types";
 
 type ViewHeaderProps = {
   title?: string;
-  searchPlaceholder: string;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
+  searchPlaceholder?: string;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   actions: StudySidekickActions;
+  showSearch?: boolean;
 };
 
 export default function ViewHeader({
   title = "Study Command Centre",
-  searchPlaceholder,
-  searchValue,
-  onSearchChange,
   actions,
 }: ViewHeaderProps) {
   return (
@@ -22,16 +20,6 @@ export default function ViewHeader({
           <span className="font-headline-lg text-headline-lg font-bold text-primary whitespace-nowrap">
             {title}
           </span>
-          <div className="hidden lg:flex items-center bg-surface-container rounded-full px-md py-xs border-2 border-surface-variant flex-1 max-w-md">
-            <span className="material-symbols-outlined text-on-surface-variant mr-sm">search</span>
-            <input
-              className="bg-transparent border-none focus:outline-none focus:ring-0 text-body-md w-full placeholder:text-on-surface-variant/50"
-              placeholder={searchPlaceholder}
-              type="search"
-              value={searchValue}
-              onChange={(event) => onSearchChange(event.target.value)}
-            />
-          </div>
         </div>
         <nav className="flex items-center gap-sm">
           <button
@@ -61,9 +49,12 @@ export default function ViewHeader({
         </nav>
       </div>
       {actions.actionMessage ? (
-        <p className="max-w-7xl mx-auto mt-sm font-label-md text-label-md text-on-surface-variant">
-          {actions.actionMessage}
-        </p>
+        <div className="max-w-7xl mx-auto mt-sm" aria-live="polite" role="status">
+          <p className="soft-status-pill inline-flex max-w-full items-center gap-xs rounded-full border-2 border-primary-fixed-dim bg-primary-container/45 px-sm py-xs font-label-md text-label-md text-primary">
+            <span className="status-dot h-2 w-2 shrink-0 rounded-full bg-primary" />
+            <span className="truncate">{actions.actionMessage}</span>
+          </p>
+        </div>
       ) : null}
     </header>
   );

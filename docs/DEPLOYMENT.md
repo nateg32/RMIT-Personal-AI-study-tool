@@ -28,6 +28,9 @@ Required variables:
 - `GEMINI_API_KEY` if AI generation is enabled
 - `GEMINI_MODEL` defaults to `gemini-3.1-pro-preview`
 - `CANVAS_BASE_URL`
+- `RESEND_API_KEY` if Support Desk ticket emails should be sent
+- `SUPPORT_FROM_EMAIL` defaults to `Study Sidekick <support@creatorbot.app>`
+- `SUPPORT_TO_EMAIL` defaults to `support@creatorbot.app`
 
 Vercel Cron calls `/api/cron/daily-brief`. The route rejects requests unless the `Authorization` header matches `Bearer ${CRON_SECRET}`.
 

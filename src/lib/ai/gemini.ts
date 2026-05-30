@@ -15,6 +15,9 @@ export const studyPlanSchema = z.object({
   title: z.string(),
   durationMinutes: z.number(),
   riskLevel: z.enum(["low", "medium", "high", "critical"]),
+  contextConfidence: z.enum(["high", "medium", "low"]).optional(),
+  contextSummary: z.array(z.string()).optional(),
+  needsUserContext: z.boolean().optional(),
   assignmentBrief: z.string().optional(),
   rubricFocus: z.array(z.string()).optional(),
   blocks: z.array(
@@ -91,6 +94,7 @@ function fallbackStudyPlan(input: StudySessionInput): StudyPlan {
   const urgency = getUrgency(input.context.assignment);
   const duration = input.durationMinutes;
   const assignment = input.context.assignment;
+  const hasUsefulContext = input.context.contextConfidence !== "low" || Boolean(input.extraContext?.trim());
   const criteria = input.context.rubricCriteria.length
     ? input.context.rubricCriteria
     : ["Confirm the deliverables", "Match work to the marking criteria", "Check submission requirements"];
@@ -150,7 +154,16 @@ function fallbackStudyPlan(input: StudySessionInput): StudyPlan {
     title: `${assignment.courseName} - ${assignment.name} Sprint`,
     durationMinutes: duration,
     riskLevel: urgency.label,
+    contextConfidence: input.context.contextConfidence,
+    contextSummary: [
+      assignment.description ? "Canvas assignment description found." : "Canvas assignment description is missing.",
+      input.context.rubricCriteria.length ? "Rubric criteria found." : "Rubric criteria were not available.",
+      resources.length ? `${resources.length} related files or module resources found.` : "No related files or module resources were found.",
+      input.extraContext?.trim() ? "User-provided notes were included." : "No extra user notes were included.",
+    ],
+    needsUserContext: !hasUsefulContext,
     assignmentBrief:
+      input.extraContext?.trim() ||
       assignment.description ||
       `Work session for ${assignment.name}. Canvas did not provide a synced description yet.`,
     rubricFocus: criteria,
@@ -193,6 +206,7 @@ export type StudySessionInput = {
   energyLevel: string;
   targetOutcome: string;
   timezone: string;
+  extraContext?: string;
 };
 
 export async function generateStudySession(input: StudySessionInput): Promise<StudyPlan> {
@@ -214,6 +228,9 @@ Assignment:
 - Rubric criteria: ${JSON.stringify(input.context.rubricCriteria)}
 - Related resources: ${JSON.stringify(input.context.relatedResources)}
 - Related files: ${JSON.stringify(input.context.relatedFiles)}
+- Context confidence: ${input.context.contextConfidence}
+- Context summary: ${JSON.stringify(input.context.missingContext)}
+- User-provided extra instructions or brief notes: ${input.extraContext || "none"}
 - Deep-readable uploaded files attached to this request: ${
     input.mediaMaterials?.length
       ? input.mediaMaterials.map((item) => `${item.name} (${item.contentType})`).join(", ")
@@ -228,8 +245,9 @@ User choices:
 - Energy: ${input.energyLevel}
 - Target outcome: ${input.targetOutcome}
 
-Return fields: title, durationMinutes, riskLevel, assignmentBrief, rubricFocus, blocks, checklist, definitionOfDone, resourcesToOpen, suggestedBreaks, nextAction, riskWarning.
+Return fields: title, durationMinutes, riskLevel, contextConfidence, contextSummary, needsUserContext, assignmentBrief, rubricFocus, blocks, checklist, definitionOfDone, resourcesToOpen, suggestedBreaks, nextAction, riskWarning.
 Each block must include concrete tasks, a goal, resource names where useful, and optional breakMinutes.
+If context confidence is low and there are no user-provided notes, be honest that the plan is a lightweight starter plan and set needsUserContext true.
 `;
 
   try {
@@ -240,7 +258,23 @@ Each block must include concrete tasks, a goal, resource names where useful, and
         responseMimeType: "application/json",
       },
     });
-    return studyPlanSchema.parse(safeParseJson(response.text || ""));
+    const parsed = studyPlanSchema.parse(safeParseJson(response.text || ""));
+    return {
+      ...parsed,
+      contextConfidence: parsed.contextConfidence || input.context.contextConfidence,
+      needsUserContext:
+        parsed.needsUserContext ?? (input.context.contextConfidence === "low" && !input.extraContext?.trim()),
+      contextSummary:
+        parsed.contextSummary && parsed.contextSummary.length
+          ? parsed.contextSummary
+          : [
+              input.context.assignment.description ? "Canvas assignment description found." : "Canvas assignment description is missing.",
+              input.context.rubricCriteria.length ? "Rubric criteria found." : "Rubric criteria were not available.",
+              [...input.context.relatedFiles, ...input.context.relatedResources].length
+                ? "Related files or module resources found."
+                : "No related files or module resources were found.",
+            ],
+    };
   } catch {
     return fallbackStudyPlan(input);
   }
@@ -341,6 +375,13 @@ You are Sidekick, a calm Canvas-aware study assistant for a university student.
 Sound human, specific, and easygoing. Lead with the useful answer, then give the evidence.
 Avoid stiff phrases like "Based on synced Canvas data" unless correcting uncertainty.
 Use short paragraphs and tight bullet lists when helpful.
+You are agent-like, but only through backend-approved tools. The backend may execute safe tools before this answer:
+- create a study session or custom focus plan
+- hide a named course or assignment from the dashboard scope
+- reset dashboard scope
+- rank and explain study priorities
+Do not claim you performed an action unless the backend facts/tool result clearly says it happened.
+Do not offer unsafe actions such as submitting assignments, editing Canvas, emailing lecturers, changing grades, or deleting Canvas data.
 Only answer using the facts below.
 Never invent due dates, assignment requirements, rubrics, submission statuses, grades, files, module resources, or announcements.
 If data is stale or missing, say so.

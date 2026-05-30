@@ -7,7 +7,9 @@ import {
   getChatGeminiMaterialsForUser,
   getChatManualMaterialsForUser,
 } from "@/lib/data/assignment-context";
+import { getAssignmentsForUser, getCoursesForUser } from "@/lib/data/lists";
 import { chatWithCanvasContext } from "@/lib/ai/gemini";
+import { runStudyAgent } from "@/lib/ai/study-agent";
 import { rateLimit } from "@/lib/rate-limit";
 import type { CanvasAssignmentSummary } from "@/lib/types";
 
@@ -39,7 +41,22 @@ export async function POST(request: Request) {
     const limit = rateLimit(`chat:${user.id}`, 20, 60_000);
     if (!limit.ok) return jsonError(new Error("Too many chat requests"), 429);
     const { message } = await parseJson(request, chatSchema);
-    const dashboard = await getDashboardData(user);
+    const [dashboard, assignments, courses] = await Promise.all([
+      getDashboardData(user),
+      getAssignmentsForUser(user),
+      getCoursesForUser(user),
+    ]);
+    const agentResult = await runStudyAgent({
+      user,
+      message,
+      dashboard,
+      assignments,
+      courses,
+    });
+    if (agentResult) {
+      return jsonOk({ ...agentResult, lastSyncAt: dashboard.lastSyncAt });
+    }
+
     const [assignmentContexts, manualMaterials, geminiMaterials] = await Promise.all([
       getChatAssignmentContextsForUser(user, message),
       getChatManualMaterialsForUser(user, message),
