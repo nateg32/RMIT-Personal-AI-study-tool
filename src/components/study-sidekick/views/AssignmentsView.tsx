@@ -28,9 +28,7 @@ export default function AssignmentsView({
   courses,
   actions,
   onCreateSession,
-  onSelectAssignment,
   onUpdateAssignmentStatus,
-  onHideAssignment,
   isCreatingSession,
   hiddenAssignmentIds = [],
 }: AssignmentsViewProps) {
@@ -115,18 +113,6 @@ export default function AssignmentsView({
             </option>
           ))}
         </select>
-        <div className="ml-auto hidden sm:block">
-          <button
-            type="button"
-            className="bg-primary-container text-on-primary-container px-lg py-sm rounded-full font-label-md text-label-md flex items-center gap-sm bubbly-button border-2 border-primary-fixed-dim disabled:opacity-60"
-            onClick={() => filteredAssignments[0] && onCreateSession(filteredAssignments[0].id)}
-            disabled={!filteredAssignments.length || isCreatingSession || actionsDisabled}
-            title={actions.disabledReason || undefined}
-          >
-            <span className="material-symbols-outlined">add</span>
-            Create Study Session
-          </button>
-        </div>
       </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter max-w-7xl mx-auto w-full">
@@ -144,34 +130,28 @@ export default function AssignmentsView({
           return (
             <article
               key={assignment.id}
-              className={`sticky-note p-md rounded-lg bubbly-shadow border-2 flex flex-col justify-between min-h-[300px] folded-corner ${palette}`}
+              className={`straight-panel p-lg rounded-lg border-2 flex min-h-[340px] flex-col justify-between overflow-visible ${palette}`}
             >
               <div>
-                <div className="flex justify-between items-start mb-sm gap-sm">
-                  <span className="px-sm py-xs bg-white/60 rounded-full font-label-sm text-label-sm line-clamp-1">
+                <div className="mb-md flex flex-wrap items-center gap-xs">
+                  <span className="rounded-full bg-white/65 px-sm py-xs font-label-sm text-label-sm line-clamp-1">
                     {assignment.courseCode || assignment.courseName}
                   </span>
-                  <span className="px-sm py-xs bg-white/50 rounded-full font-label-sm text-label-sm line-clamp-1">
+                  <span className="rounded-full bg-white/50 px-sm py-xs font-label-sm text-label-sm line-clamp-1">
                     {assignmentTypeLabel(assignment)}
                   </span>
                   <span
-                    className={`font-label-sm text-label-sm px-sm py-xs rounded-full border bg-white/70 ${riskTone(risk)}`}
+                    className={`ml-auto rounded-full border bg-white/75 px-sm py-xs font-label-sm text-label-sm ${riskTone(risk)}`}
                   >
                     {risk}
                   </span>
                 </div>
                 <h3 className="font-headline-md text-headline-md mb-xs line-clamp-2">{assignment.name}</h3>
-                <p className="font-body-md opacity-80 mb-md line-clamp-3">
+                <p className="font-body-md opacity-80 mb-md line-clamp-2">
                   {compactText(assignment.description || assignment.rubricSummary, "Canvas details will appear after sync.")}
                 </p>
-                {assignment.rubricSummary ? (
-                  <div className="bg-white/50 rounded-lg p-sm border border-white/70 mb-md">
-                    <p className="font-label-sm text-label-sm uppercase opacity-70">Rubric signal</p>
-                    <p className="font-body-md line-clamp-2">{assignment.rubricSummary}</p>
-                  </div>
-                ) : null}
                 {assignment.priorityReason ? (
-                  <p className="font-label-md text-label-md opacity-80 mb-md">
+                  <p className="font-label-md text-label-md opacity-80 line-clamp-2">
                     Priority: {assignment.priorityReason}
                   </p>
                 ) : null}
@@ -195,27 +175,20 @@ export default function AssignmentsView({
                   <span>{assignment.pointsPossible ? `${assignment.pointsPossible} pts` : "No points listed"}</span>
                   <span>{estimateEffort(assignment)}</span>
                 </div>
-                <div className="flex gap-sm">
+                <div className="flex flex-wrap gap-sm pt-xs">
                   <button
                     type="button"
-                    className="flex-1 bg-white/80 text-on-surface py-xs rounded-lg font-label-md text-label-md bubbly-button disabled:opacity-60"
+                    className="flex min-w-[9rem] flex-1 items-center justify-center gap-xs rounded-full bg-white/85 px-md py-sm font-label-md text-label-md text-on-surface bubbly-button disabled:opacity-60"
                     onClick={() => onCreateSession(assignment.id)}
                     disabled={mutationDisabled || isHidden}
                     title={actions.disabledReason || (isHidden ? "Already removed from dashboard scope" : undefined)}
                   >
-                    Create Study Session
+                    <span className="material-symbols-outlined text-[18px]">timer</span>
+                    Plan session
                   </button>
                   <button
                     type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
-                    onClick={() => onSelectAssignment(assignment.id)}
-                    aria-label="Open study planner"
-                  >
-                    <span className="material-symbols-outlined">timer</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex items-center justify-center gap-xs rounded-full bg-white/50 px-md py-sm font-label-md text-label-md transition-all hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() =>
                       onUpdateAssignmentStatus(
                         assignment.id,
@@ -226,33 +199,19 @@ export default function AssignmentsView({
                     aria-label={isSubmitted(assignment) ? "Reopen assignment locally" : "Mark done elsewhere"}
                     title={actions.disabledReason || (isHidden ? "Already removed from dashboard scope" : undefined)}
                   >
-                    <span className="material-symbols-outlined">
+                    <span className="material-symbols-outlined text-[18px]">
                       {isSubmitted(assignment) ? "undo" : "task_alt"}
                     </span>
+                    <span>{isSubmitted(assignment) ? "Reopen" : "Done"}</span>
                   </button>
                   <button
                     type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={() => {
-                      if (!isHidden) onHideAssignment(assignment.id);
-                    }}
-                    disabled={actionsDisabled || isHidden}
-                    aria-label={isHidden ? "Already removed from dashboard" : "Remove from dashboard"}
-                    title={
-                      isHidden
-                        ? "Already removed from dashboard and future syncs"
-                        : actions.disabledReason || "Remove from dashboard and future syncs"
-                    }
-                  >
-                    <span className="material-symbols-outlined">{isHidden ? "check" : "delete"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex items-center justify-center gap-xs rounded-full bg-white/50 px-md py-sm font-label-md text-label-md transition-all hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => openCanvas(assignment.htmlUrl)}
                     aria-label="Open in Canvas"
                   >
-                    <span className="material-symbols-outlined">open_in_new</span>
+                    <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                    <span>Open</span>
                   </button>
                 </div>
               </div>
