@@ -118,6 +118,32 @@ function SubjectCard({ course }: { course: CourseDashboardSummary }) {
   );
 }
 
+function syncNotice(dashboard: DashboardSummary, isSyncing?: boolean) {
+  if (isSyncing) {
+    return "Canvas is syncing now. Courses are refreshed one by one so the dashboard can keep responding.";
+  }
+
+  const lastSync = dashboard.lastSuccessfulSyncAt || dashboard.lastSyncAt;
+
+  if (!dashboard.canvasConfigured) {
+    return "Canvas is not connected yet. Connect Canvas in Settings to import courses, assignments, files, and announcements.";
+  }
+
+  if (dashboard.syncStatus === "error") {
+    return `The last Canvas sync attempt hit an error${
+      dashboard.syncError ? `: ${dashboard.syncError}` : ""
+    }. Last successful sync: ${lastSync ? new Date(lastSync).toLocaleString("en-AU") : "never"}.`;
+  }
+
+  if (!lastSync) {
+    return "Canvas has not completed a successful sync yet. Use Sync now to import your dashboard data.";
+  }
+
+  return `Canvas was last synced ${new Date(lastSync).toLocaleString(
+    "en-AU",
+  )}. That is outside the freshness window, so the dashboard may be out of date until the next refresh finishes.`;
+}
+
 export default function DashboardView({ dashboard, dailyBrief, sessions, actions, onCreateSession }: DashboardViewProps) {
   const [search, setSearch] = useState("");
   const greeting = useMemo(
@@ -196,13 +222,13 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
           </div>
         </section>
 
-        {dashboard.stale ? (
-          <div className="mb-lg bg-tertiary-container/40 border-2 border-tertiary-fixed-dim rounded-lg p-md flex items-center gap-sm">
-            <span className="material-symbols-outlined text-tertiary">warning</span>
+        {dashboard.stale || actions.isSyncing ? (
+          <div className="mb-lg bg-tertiary-container/40 border-2 border-tertiary-fixed-dim rounded-lg p-md flex items-start gap-sm">
+            <span className="material-symbols-outlined text-tertiary mt-0.5">
+              {actions.isSyncing ? "sync" : "warning"}
+            </span>
             <p className="font-body-md text-body-md text-on-tertiary-container">
-              Canvas data is stale or not synced yet. Last sync:{" "}
-              {dashboard.lastSyncAt ? new Date(dashboard.lastSyncAt).toLocaleString("en-AU") : "never"}. Use Sync now
-              to refresh it.
+              {syncNotice(dashboard, actions.isSyncing)}
             </p>
           </div>
         ) : null}
