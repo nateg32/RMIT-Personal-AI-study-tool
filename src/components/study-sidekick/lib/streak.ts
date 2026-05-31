@@ -234,7 +234,7 @@ export function buildFocusStats(
     {
       description: "Create or start one session to begin the loop.",
       earned: activeDays.size > 0,
-      icon: "spark",
+      icon: "auto_awesome",
       label: "Spark started",
     },
     {

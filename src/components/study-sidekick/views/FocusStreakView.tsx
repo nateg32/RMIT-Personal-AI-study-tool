@@ -183,8 +183,8 @@ export default function FocusStreakView({
           />
         </section>
 
-        <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[1fr_0.82fr]">
-          <div className="straight-panel rounded-lg border-2 border-surface-variant bg-surface-container-lowest p-lg">
+        <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[1fr_0.82fr] xl:items-start">
+          <div className="straight-panel h-fit rounded-lg border-2 border-surface-variant bg-surface-container-lowest p-lg">
             <div className="flex flex-col gap-sm md:flex-row md:items-end md:justify-between">
               <div>
                 <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Last seven days</p>
@@ -285,28 +285,61 @@ export default function FocusStreakView({
             </div>
 
             <div className="straight-panel rounded-lg border-2 border-surface-variant bg-surface-container-lowest p-lg">
-              <div className="flex items-center justify-between gap-sm">
-                <div>
+              <div className="flex items-start justify-between gap-md">
+                <div className="min-w-0 flex-1">
                   <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Badges</p>
-                  <h2 className="font-headline-md text-headline-md text-on-surface">{earnedBadges}/{stats.badges.length} earned</h2>
+                  <h2 className="mt-xs font-headline-md text-headline-md text-on-surface">
+                    {earnedBadges}/{stats.badges.length} earned
+                  </h2>
+                  <p className="mt-xs max-w-[18rem] font-body-sm text-body-sm text-on-surface-variant">
+                    Small milestones that reward showing up, not perfection.
+                  </p>
                 </div>
-                <span className="material-symbols-outlined text-[40px] text-primary">workspace_premium</span>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border-2 border-primary-fixed-dim bg-primary-container/60">
+                  <span className="material-symbols-outlined text-[30px] text-primary">workspace_premium</span>
+                </div>
               </div>
-              <div className="mt-md space-y-sm">
+              <div className="mt-md">
+                <ProgressBar value={(earnedBadges / Math.max(1, stats.badges.length)) * 100} />
+              </div>
+              <div className="mt-md grid gap-sm">
                 {stats.badges.map((badge) => (
                   <article
                     key={badge.label}
-                    className={`rounded-lg border-2 p-sm ${
+                    className={`rounded-lg border-2 px-md py-sm transition-colors ${
                       badge.earned
                         ? "border-primary-fixed-dim bg-primary-container/45"
-                        : "border-surface-variant bg-surface-container-low"
+                        : "border-surface-variant bg-surface-container-low/70"
                     }`}
                   >
-                    <div className="flex items-start gap-sm">
-                      <span className="material-symbols-outlined text-primary">{badge.earned ? badge.icon : "lock"}</span>
-                      <div>
-                        <p className="font-headline-sm text-headline-sm text-on-surface">{badge.label}</p>
-                        <p className="font-body-md text-body-md text-on-surface-variant">{badge.description}</p>
+                    <div className="flex items-center gap-sm">
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${
+                          badge.earned
+                            ? "border-primary-fixed-dim bg-white text-primary"
+                            : "border-outline-variant bg-white/70 text-on-surface-variant"
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[22px]">
+                          {badge.earned ? badge.icon : "lock"}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-xs">
+                          <p className="font-headline-sm text-headline-sm text-on-surface">{badge.label}</p>
+                          <span
+                            className={`rounded-full border px-sm py-0.5 font-label-sm text-label-sm ${
+                              badge.earned
+                                ? "border-primary-fixed-dim bg-white text-primary"
+                                : "border-surface-variant bg-white/70 text-on-surface-variant"
+                            }`}
+                          >
+                            {badge.earned ? "Earned" : "Locked"}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 font-body-sm text-body-sm text-on-surface-variant">
+                          {badge.description}
+                        </p>
                       </div>
                     </div>
                   </article>
