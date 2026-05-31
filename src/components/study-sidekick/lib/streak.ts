@@ -48,7 +48,7 @@ function dayLabel(value: Date, timezone: string) {
   }
 }
 
-function completedMinutes(session: StudySessionRecord) {
+export function completedMinutes(session: StudySessionRecord) {
   const status = sessionStatus(session);
   if (["completed", "done"].includes(status)) return session.durationMinutes;
   const completed = completedTaskCount(session);
@@ -73,6 +73,50 @@ function countBackwards(activeDays: Set<string>, start: Date, timezone: string) 
   return count;
 }
 
+export function xpForFocusMinutes(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  if (!safeMinutes) return 0;
+
+  const deepWorkBonus =
+    safeMinutes >= 90 ? 140 : safeMinutes >= 50 ? 80 : safeMinutes >= 25 ? 35 : safeMinutes >= 10 ? 10 : 0;
+
+  return safeMinutes * 4 + deepWorkBonus;
+}
+
+export function xpForSession(session: StudySessionRecord) {
+  return xpForFocusMinutes(completedMinutes(session));
+}
+
+export function levelFromXp(totalXp: number) {
+  let level = 1;
+  let remainingXp = Math.max(0, Math.round(totalXp));
+  let nextLevelXp = 500;
+
+  while (remainingXp >= nextLevelXp) {
+    remainingXp -= nextLevelXp;
+    level += 1;
+    nextLevelXp = 500 + (level - 1) * 150;
+  }
+
+  const titles = [
+    "Getting started",
+    "Momentum builder",
+    "Steady learner",
+    "Deep work regular",
+    "Locked-in student",
+    "Exam-season calm",
+  ];
+
+  return {
+    currentLevelXp: remainingXp,
+    level,
+    nextLevelXp,
+    progressPercent: nextLevelXp ? Math.round((remainingXp / nextLevelXp) * 100) : 0,
+    title: titles[Math.min(titles.length - 1, level - 1)],
+    xpToNextLevel: Math.max(0, nextLevelXp - remainingXp),
+  };
+}
+
 export function buildFocusStats(
   sessions: StudySessionRecord[],
   timezone = "Australia/Sydney",
@@ -90,6 +134,10 @@ export function buildFocusStats(
   let plannedMinutes = 0;
   let focusedMinutes = 0;
   let todayMinutes = 0;
+  let totalXp = 0;
+  let longestSessionMinutes = 0;
+  let deepWorkSessions = 0;
+  let quickWinSessions = 0;
 
   const dayTotals = new Map<string, { sessions: number; minutes: number; focused: boolean }>();
 
@@ -107,6 +155,10 @@ export function buildFocusStats(
     completedBlocks += completedTaskCount(session);
     plannedMinutes += session.durationMinutes;
     focusedMinutes += minutes;
+    totalXp += xpForFocusMinutes(minutes);
+    longestSessionMinutes = Math.max(longestSessionMinutes, minutes);
+    if (minutes >= 50) deepWorkSessions += 1;
+    if (minutes > 0 && minutes < 25) quickWinSessions += 1;
     if (focused) startedSessions += 1;
     if (["completed", "done"].includes(sessionStatus(session))) completedSessions += 1;
     if (focusKey === today) todayMinutes += minutes;
@@ -162,6 +214,21 @@ export function buildFocusStats(
       sessions: totals.sessions,
     };
   });
+  const weekMinutes = sevenDayTrail.reduce((total, day) => total + day.minutes, 0);
+  const weekFocusedDays = sevenDayTrail.filter((day) => day.focused).length;
+  const weekGoalMinutes = 180;
+  const weeklyProgressPercent = Math.min(100, Math.round((weekMinutes / weekGoalMinutes) * 100));
+  const averageSessionMinutes = startedSessions ? Math.round(focusedMinutes / startedSessions) : 0;
+  const completionRate = startedSessions ? Math.round((completedSessions / startedSessions) * 100) : 0;
+  const consistencyScore = Math.min(
+    100,
+    Math.round((weekFocusedDays / 7) * 55 + Math.min(1, weekMinutes / weekGoalMinutes) * 35 + (completionRate / 100) * 10),
+  );
+  const bestDay = Array.from(dayTotals.entries()).reduce(
+    (best, [key, value]) => (value.minutes > best.minutes ? { key, minutes: value.minutes } : best),
+    { key: "", minutes: 0 },
+  );
+  const level = levelFromXp(totalXp);
 
   const badges = [
     {
@@ -188,6 +255,18 @@ export function buildFocusStats(
       icon: "military_tech",
       label: "Locked-in learner",
     },
+    {
+      description: "Earn 1,500 XP from focused minutes.",
+      earned: totalXp >= 1500,
+      icon: "bolt",
+      label: "XP collector",
+    },
+    {
+      description: "Complete five deeper sessions of 50 minutes or more.",
+      earned: deepWorkSessions >= 5,
+      icon: "psychology",
+      label: "Deep work mode",
+    },
   ];
 
   const nextNudge = activeDays.has(today)
@@ -198,20 +277,33 @@ export function buildFocusStats(
 
   return {
     activeDays: activeDays.size,
+    averageSessionMinutes,
     badges,
+    bestDay,
     completedBlocks,
     completedSessions,
+    completionRate,
+    consistencyScore,
     currentStreak,
+    deepWorkSessions,
     focusedDays: focusedDays.size,
     focusedMinutes,
+    level,
     longestStreak,
+    longestSessionMinutes,
     nextNudge,
     plannedMinutes,
     protectedStreak,
+    quickWinSessions,
     sevenDayTrail,
     startedSessions,
     streakAtRisk,
     todayActive: activeDays.has(today),
     todayMinutes,
+    totalXp,
+    weekFocusedDays,
+    weeklyProgressPercent,
+    weekGoalMinutes,
+    weekMinutes,
   };
 }

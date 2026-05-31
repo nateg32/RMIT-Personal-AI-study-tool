@@ -320,6 +320,9 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
                 <p className="font-headline-md text-headline-md font-bold">
                   {focusStats.protectedStreak} {focusStats.protectedStreak === 1 ? "Day" : "Days"}
                 </p>
+                <p className="font-label-sm text-label-sm text-primary">
+                  Level {focusStats.level.level} - {focusStats.totalXp.toLocaleString("en-AU")} XP
+                </p>
                 {focusStats.streakAtRisk ? (
                   <p className="font-label-sm text-label-sm text-tertiary">Protect it today</p>
                 ) : null}

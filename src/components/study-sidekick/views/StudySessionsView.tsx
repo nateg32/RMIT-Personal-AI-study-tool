@@ -11,6 +11,7 @@ import type {
   StudySidekickActions,
 } from "../types";
 import { compactText, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
+import { xpForFocusMinutes } from "../lib/streak";
 
 type StudySessionsViewProps = {
   assignments: AssignmentSummary[];
@@ -70,6 +71,11 @@ function minutesToClock(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
   const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${rest}`;
+}
+
+function planFocusMinutes(plan: StudyPlan) {
+  const blockMinutes = plan.blocks.reduce((total, block) => total + Math.max(0, block.minutes || 0), 0);
+  return Math.max(5, plan.durationMinutes || blockMinutes || defaultDuration);
 }
 
 function buildMemoryPattern(length = 3) {
@@ -204,6 +210,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const progressRatio = totalSeconds ? (totalSeconds - secondsLeft) / totalSeconds : 0;
   const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
   const checklistText = checklist.join("\n");
+  const sessionRewardMinutes = planFocusMinutes(plan);
+  const sessionRewardXp = xpForFocusMinutes(sessionRewardMinutes);
   const actionsDisabled = Boolean(actions.isBusy);
   const summaryItems = plan.contextSummary?.length
     ? plan.contextSummary
@@ -601,6 +609,19 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     : "Let your brain cool down. Pick one quiet reset, then come back for the next block."}
                 </p>
 
+                {isLastBlock ? (
+                  <div className="mt-lg inline-flex flex-col rounded-lg border-2 border-primary-fixed-dim bg-white/85 px-lg py-md text-left shadow-sm">
+                    <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Session reward</p>
+                    <div className="mt-xs flex items-end gap-sm">
+                      <span className="font-display-md text-display-md text-primary">+{sessionRewardXp.toLocaleString("en-AU")}</span>
+                      <span className="pb-xs font-headline-sm text-headline-sm text-on-surface">XP</span>
+                    </div>
+                    <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
+                      Longer sessions earn more XP, but every finished block protects your momentum.
+                    </p>
+                  </div>
+                ) : null}
+
                 {!isLastBlock ? (
                   <div className="mt-lg rounded-lg border-2 border-primary-fixed-dim bg-white/85 p-md">
                     <div className="flex flex-wrap gap-xs">
@@ -669,11 +690,11 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
               <aside className="rounded-lg border-2 border-surface-variant bg-white/85 p-md">
                 <p className="font-label-md text-label-md uppercase text-primary">{isLastBlock ? "After this" : "Next up"}</p>
                 <h3 className="mt-xs font-headline-md text-headline-md text-on-surface">
-                  {isLastBlock ? "Save the win" : plan.blocks[safeActiveBlockIndex + 1]?.name || "Next block"}
+                  {isLastBlock ? "XP saved" : plan.blocks[safeActiveBlockIndex + 1]?.name || "Next block"}
                 </h3>
                 <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
                   {isLastBlock
-                    ? "Mark anything finished, then decide the next smallest task."
+                    ? "Your focus analytics will update from completed session time. Check your streak when you are ready."
                     : plan.blocks[safeActiveBlockIndex + 1]?.tasks?.[0] || "Review the next task and keep it small."}
                 </p>
                 <button
@@ -683,6 +704,19 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 >
                   {isLastBlock ? "Exit session" : breakSecondsLeft > 0 ? "Skip break" : "I am ready"}
                 </button>
+                {isLastBlock ? (
+                  <button
+                    type="button"
+                    className="mt-sm w-full rounded-full border-2 border-primary-fixed-dim bg-white py-xs font-label-md text-label-md text-primary"
+                    onClick={() => {
+                      setFocusFullscreen(false);
+                      setFocusStage("brief");
+                      actions.onNavigate("streak");
+                    }}
+                  >
+                    View focus analytics
+                  </button>
+                ) : null}
               </aside>
             </div>
           ) : null}
