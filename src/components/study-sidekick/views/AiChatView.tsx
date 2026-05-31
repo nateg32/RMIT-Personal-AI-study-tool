@@ -63,11 +63,26 @@ function thinkingWorkflow(message?: string) {
       title: "Checking announcements",
       icon: "campaign",
       steps: [
-        "Understanding what update you need",
-        "Looking through recent announcements",
-        "Matching posts to your courses",
-        "Checking if anything changes your priorities",
-        "Preparing the useful bits only",
+        {
+          label: "Understanding the update you need",
+          detail: "Reading your question and deciding whether this is about announcements, course changes, or deadlines.",
+        },
+        {
+          label: "Looking through recent announcements",
+          detail: "Checking the synced announcement list and keeping Canvas as the source of truth.",
+        },
+        {
+          label: "Matching posts to your courses",
+          detail: "Grouping updates by subject so the answer is not just a dump of notifications.",
+        },
+        {
+          label: "Checking priority impact",
+          detail: "Looking for announcements that change due dates, tasks, files, or what you should do next.",
+        },
+        {
+          label: "Writing the useful bits only",
+          detail: "Turning the relevant updates into a clean answer.",
+        },
       ],
     };
   }
@@ -76,11 +91,26 @@ function thinkingWorkflow(message?: string) {
       title: "Ranking your priorities",
       icon: "event",
       steps: [
-        "Understanding the task",
-        "Checking due dates and submission status",
-        "Sorting work by urgency and risk",
-        "Looking for relevant files or notes",
-        "Turning it into a clear next move",
+        {
+          label: "Understanding the task",
+          detail: "Figuring out whether you need a due-date list, a next action, or a full priority order.",
+        },
+        {
+          label: "Checking due dates and submissions",
+          detail: "Reading synced assignments, local done states, and Canvas submission status.",
+        },
+        {
+          label: "Sorting by urgency and risk",
+          detail: "Prioritising due-soon, overdue, unsubmitted, and higher-impact work first.",
+        },
+        {
+          label: "Looking for supporting context",
+          detail: "Checking related files, uploaded notes, and assignment context if they are available.",
+        },
+        {
+          label: "Turning it into a next move",
+          detail: "Compressing the result into something you can act on today.",
+        },
       ],
     };
   }
@@ -89,11 +119,26 @@ function thinkingWorkflow(message?: string) {
       title: "Reading study context",
       icon: "folder_open",
       steps: [
-        "Understanding the question",
-        "Finding matching course material",
-        "Checking uploaded files and Canvas resources",
-        "Pulling out useful study signals",
-        "Building a grounded answer",
+        {
+          label: "Understanding the question",
+          detail: "Working out whether you mean a Canvas resource, uploaded material, or a specific course file.",
+        },
+        {
+          label: "Finding matching material",
+          detail: "Searching synced file names, manual uploads, and related course context.",
+        },
+        {
+          label: "Checking readable content",
+          detail: "Using indexed text or Gemini-readable attachments when the file has been uploaded.",
+        },
+        {
+          label: "Pulling out study signals",
+          detail: "Looking for concepts, deliverables, lectures, and practical next steps.",
+        },
+        {
+          label: "Building a grounded answer",
+          detail: "Answering from the material it can actually see.",
+        },
       ],
     };
   }
@@ -102,11 +147,26 @@ function thinkingWorkflow(message?: string) {
       title: "Building the plan",
       icon: "psychology",
       steps: [
-        "Understanding the assignment",
-        "Checking Canvas facts and rubrics",
-        "Finding relevant lectures or files",
-        "Breaking work into small blocks",
-        "Making the plan timer-ready",
+        {
+          label: "Understanding the assignment",
+          detail: "Identifying the task, due date, submission state, and what the session should achieve.",
+        },
+        {
+          label: "Checking Canvas facts",
+          detail: "Using descriptions, rubrics, modules, and local uploads without changing Canvas.",
+        },
+        {
+          label: "Finding useful resources",
+          detail: "Looking for lectures, slides, files, or notes that support the session.",
+        },
+        {
+          label: "Breaking work into blocks",
+          detail: "Turning the work into small focus blocks with realistic timing.",
+        },
+        {
+          label: "Making it timer-ready",
+          detail: "Preparing a clean plan you can review before locking in.",
+        },
       ],
     };
   }
@@ -114,11 +174,26 @@ function thinkingWorkflow(message?: string) {
     title: "Thinking with context",
     icon: "auto_awesome",
     steps: [
-      "Understanding your question",
-      "Checking synced Canvas facts",
-      "Looking at uploaded materials",
-      "Separating facts from guesses",
-      "Writing a useful answer",
+      {
+        label: "Understanding your question",
+        detail: "Reading the intent and deciding which study context matters.",
+      },
+      {
+        label: "Checking synced Canvas facts",
+        detail: "Looking at assignments, courses, announcements, and files from the database.",
+      },
+      {
+        label: "Looking at uploaded materials",
+        detail: "Checking any manual notes or documents that match your question.",
+      },
+      {
+        label: "Separating facts from guesses",
+        detail: "Keeping due dates and Canvas statuses grounded instead of inventing them.",
+      },
+      {
+        label: "Writing a useful answer",
+        detail: "Turning the facts into something clear and practical.",
+      },
     ],
   };
 }
@@ -139,18 +214,29 @@ function previousUserMessage(messages: ChatMessage[], index: number) {
   return "";
 }
 
-function SidekickWorking({ userMessage }: { userMessage?: string }) {
+function SidekickWorking({ userMessage, startedAt }: { userMessage?: string; startedAt: number }) {
   const workflow = thinkingWorkflow(userMessage);
-  const [activeStep, setActiveStep] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const steps = [
+    ...workflow.steps,
+    {
+      label: "Waiting for Sidekick's answer",
+      detail: "The backend is finishing the response. If Gemini is involved, this can take a few extra seconds.",
+    },
+  ];
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setActiveStep((current) => (current + 1) % workflow.steps.length);
-    }, 1150);
+      setNow(Date.now());
+    }, 350);
     return () => window.clearInterval(interval);
-  }, [workflow.steps.length]);
+  }, []);
 
-  const progress = ((activeStep + 1) / workflow.steps.length) * 100;
+  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const activeStep = Math.min(steps.length - 1, Math.floor(elapsedSeconds / 2));
+  const isWaiting = activeStep >= steps.length - 1;
+  const progress = isWaiting ? 94 : Math.max(12, ((activeStep + 1) / steps.length) * 100);
+  const currentStep = steps[activeStep] || steps[steps.length - 1];
 
   return (
     <div className="w-full min-w-[min(34rem,78vw)] whitespace-normal">
@@ -173,8 +259,9 @@ function SidekickWorking({ userMessage }: { userMessage?: string }) {
             </span>
           </div>
           <p className="mt-1 font-body-sm text-body-sm text-[#5D4E8B]">
-            Sidekick is checking the useful context, then it will answer from facts.
+            Live status: {currentStep.detail}
           </p>
+          <p className="mt-1 font-label-sm text-label-sm text-[#5D4E8B]/75">{elapsedSeconds}s elapsed</p>
         </div>
       </div>
 
@@ -183,12 +270,12 @@ function SidekickWorking({ userMessage }: { userMessage?: string }) {
       </div>
 
       <div className="mt-md grid gap-xs">
-        {workflow.steps.map((step, index) => {
+        {steps.map((step, index) => {
           const isDone = index < activeStep;
           const isActive = index === activeStep;
           return (
             <div
-              key={step}
+              key={step.label}
               className={`flex items-center gap-xs rounded-full px-sm py-xs transition-all ${
                 isActive
                   ? "bg-white text-primary shadow-sm"
@@ -198,9 +285,9 @@ function SidekickWorking({ userMessage }: { userMessage?: string }) {
               }`}
             >
               <span className={`material-symbols-outlined text-[17px] ${isActive ? "animate-pulse" : ""}`}>
-                {isDone ? "check_circle" : isActive ? "radio_button_checked" : "radio_button_unchecked"}
+                {isDone ? "check_circle" : isActive ? (isWaiting ? "hourglass_top" : "radio_button_checked") : "radio_button_unchecked"}
               </span>
-              <span className="font-label-md text-label-md">{step}</span>
+              <span className="font-label-md text-label-md">{step.label}</span>
             </div>
           );
         })}
@@ -381,7 +468,7 @@ export default function AiChatView({
                   }`}
                 >
                   {isThinkingMessage(message) ? (
-                    <SidekickWorking userMessage={previousUserMessage(messages, index)} />
+                    <SidekickWorking userMessage={previousUserMessage(messages, index)} startedAt={message.createdAt} />
                   ) : (
                     <p className="font-body-md text-body-md">{message.content}</p>
                   )}
