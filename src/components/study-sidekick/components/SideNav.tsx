@@ -8,6 +8,7 @@ interface SideNavProps {
   onStartSession: () => void;
   onSupport: () => void;
   onLogout: () => void;
+  chatAttention?: boolean;
 }
 
 const navItems = [
@@ -21,7 +22,7 @@ const navItems = [
   { id: 'settings' as const, icon: 'settings', label: 'Settings' },
 ];
 
-export default function SideNav({ activeView, onNavigate, onStartSession, onSupport, onLogout }: SideNavProps) {
+export default function SideNav({ activeView, onNavigate, onStartSession, onSupport, onLogout, chatAttention = false }: SideNavProps) {
   return (
     <aside className="fixed left-0 top-0 h-full w-[280px] bg-background border-r-2 border-surface-variant z-40 hidden md:flex flex-col">
       <div className="p-xl flex flex-col items-center text-center">
@@ -52,7 +53,7 @@ export default function SideNav({ activeView, onNavigate, onStartSession, onSupp
               type="button"
               onClick={() => onNavigate(item.id)}
               className={cn(
-                "w-full flex items-center gap-sm px-md py-sm rounded-lg transition-transform",
+                "relative w-full flex items-center gap-sm px-md py-sm rounded-lg transition-transform",
                 isActive
                   ? "bg-primary-container text-primary font-bold"
                   : "text-on-surface-variant hover:bg-surface-variant hover:text-on-surface scale-100 active:scale-95"
@@ -60,6 +61,9 @@ export default function SideNav({ activeView, onNavigate, onStartSession, onSupp
             >
               <span className="material-symbols-outlined">{item.icon}</span>
               <span className="font-label-md text-label-md">{item.label}</span>
+              {item.id === "chat" && chatAttention ? (
+                <span className="ml-auto inline-flex h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" aria-label="AI Chat needs attention" />
+              ) : null}
             </button>
           );
         })}

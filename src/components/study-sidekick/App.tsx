@@ -139,6 +139,12 @@ type ChatApiResponse = {
   agentEvents?: ChatAgentEvent[];
 };
 
+type ChatNotice = {
+  title: string;
+  body: string;
+  tone: "found" | "waiting";
+} | null;
+
 function operationId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -253,9 +259,16 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [chatProviderStatus, setChatProviderStatus] = useState<string | null>(null);
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadStoredChatMessages);
+  const [chatNotice, setChatNotice] = useState<ChatNotice>(null);
   const chatSendingRef = useRef(false);
   const activeOperationRef = useRef<ActiveOperation | null>(null);
+  const activeViewRef = useRef<ViewType>(initialView);
   const autoSyncStartedRef = useRef(false);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+    if (activeView === "chat") setChatNotice(null);
+  }, [activeView]);
 
   useEffect(() => {
     window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(serialisableChatMessages(chatMessages)));
@@ -798,6 +811,21 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             : item,
         ),
       );
+      if (activeViewRef.current !== "chat") {
+        setChatNotice(
+          payload.confirmation
+            ? {
+                title: "Sidekick is waiting for your response",
+                body: "It found a safe study action. Open AI Chat to confirm or cancel before anything changes.",
+                tone: "waiting",
+              }
+            : {
+                title: "Sidekick found what you asked for",
+                body: "Open AI Chat to read the answer when you are ready.",
+                tone: "found",
+              },
+        );
+      }
       if (payload.agentEvents?.length) {
         const firstEvent = payload.agentEvents[0];
         setActionMessage(firstEvent.label);
@@ -872,6 +900,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       }
       chatSendingRef.current = true;
       setIsChatSending(true);
+      setChatNotice(null);
       const pendingId = crypto.randomUUID();
       const now = Date.now();
       setChatMessages((current) => [
@@ -917,6 +946,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   );
 
   const cancelAgentAction = useCallback((messageId: string) => {
+    setChatNotice(null);
     setChatMessages((current) =>
       current.map((message) =>
         message.id === messageId
@@ -964,6 +994,20 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const disabledReason = activeOperation
     ? `${activeOperation.label} is running. Wait for it to finish before starting another update.`
     : null;
+  const hasPendingChatConfirmation = useMemo(
+    () => chatMessages.some((message) => message.confirmation && message.confirmationStatus === "pending"),
+    [chatMessages],
+  );
+  const chatNeedsAttention = activeView !== "chat" && (hasPendingChatConfirmation || Boolean(chatNotice));
+
+  useEffect(() => {
+    if (activeView === "chat" || !hasPendingChatConfirmation || chatNotice) return;
+    setChatNotice({
+      title: "Sidekick is waiting for your response",
+      body: "There is a pending study action in AI Chat. Confirm it when you are ready.",
+      tone: "waiting",
+    });
+  }, [activeView, chatNotice, hasPendingChatConfirmation]);
 
   const actions: StudySidekickActions = useMemo(
     () => ({
@@ -1011,6 +1055,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         onStartSession={startSession}
         onSupport={() => setActiveView("support")}
         onLogout={logOut}
+        chatAttention={chatNeedsAttention}
       />
 
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-surface-container border-t-2 border-surface-variant z-50 p-sm flex justify-around">
@@ -1019,15 +1064,40 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             key={item.view}
             type="button"
             onClick={() => setActiveView(item.view)}
-            className={`p-sm rounded-lg flex flex-col items-center ${activeView === item.view ? "text-primary bg-primary-container" : "text-on-surface-variant"}`}
+            className={`relative p-sm rounded-lg flex flex-col items-center ${activeView === item.view ? "text-primary bg-primary-container" : "text-on-surface-variant"}`}
             aria-label={`Open ${item.view}`}
           >
             <span className="material-symbols-outlined text-[24px]">{item.icon}</span>
+            {item.view === "chat" && chatNeedsAttention ? (
+              <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface-container" />
+            ) : null}
           </button>
         ))}
       </div>
 
       <main className="md:pl-[280px] flex-grow flex flex-col min-h-screen pb-16 md:pb-0 relative w-full">
+        {chatNotice && activeView !== "chat" ? (
+          <button
+            type="button"
+            className="fixed bottom-24 right-6 z-[70] max-w-sm rounded-lg border-2 border-primary-fixed-dim bg-surface-container-lowest p-md text-left shadow-xl transition-transform hover:scale-[1.01] active:scale-[0.99]"
+            onClick={() => {
+              setActiveView("chat");
+              setChatNotice(null);
+            }}
+          >
+            <div className="flex items-start gap-sm">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-container text-primary">
+                <span className="material-symbols-outlined text-[20px]">
+                  {chatNotice.tone === "waiting" ? "mark_chat_unread" : "auto_awesome"}
+                </span>
+              </div>
+              <div>
+                <p className="font-label-lg text-label-lg font-bold text-primary">{chatNotice.title}</p>
+                <p className="mt-xs font-body-sm text-body-sm text-on-surface-variant">{chatNotice.body}</p>
+              </div>
+            </div>
+          </button>
+        ) : null}
         {loading ? (
           <div className="min-h-screen flex items-center justify-center p-lg">
             <div className="sticky-note-mint p-lg rounded-lg bubbly-shadow text-center">

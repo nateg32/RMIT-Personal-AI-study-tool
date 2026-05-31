@@ -417,6 +417,80 @@ function bestAssignmentMatch(message: string, assignments: CanvasAssignmentSumma
   return scored[0].assignment;
 }
 
+function extractFocusReferenceText(content: string) {
+  const references: string[] = [];
+  const patterns = [
+    /focus session:\s*([^.\n]+?)(?:\.\s*Current block:|Current block:|Tasks:|$)/i,
+    /Help me with this focus session:\s*([^.\n]+?)(?:\.\s*Current block:|Current block:|Tasks:|$)/i,
+    /(?:study session|focus plan|session)\s+(?:for|called|named)\s+["“]?([^"”.\n]+)["”]?/i,
+  ];
+
+  patterns.forEach((pattern) => {
+    const match = content.match(pattern);
+    if (match?.[1]) references.push(match[1]);
+  });
+
+  return references.map((reference) => reference.replace(/\b(Sprint|Study Session|Focus Session)\b/gi, " ").trim());
+}
+
+function assignmentAnchorScore(text: string, assignment: CanvasAssignmentSummary) {
+  const normalisedText = normalise(text);
+  const normalisedName = normalise(assignment.name);
+  if (!normalisedText || !normalisedName) return 0;
+
+  let score = 0;
+  if (normalisedName.length >= 10 && normalisedText.includes(normalisedName)) {
+    score = Math.max(score, 1000 + normalisedName.length);
+  }
+
+  extractFocusReferenceText(text).forEach((reference) => {
+    const referenceScore = Math.max(
+      scoreCandidate(reference, assignment.name),
+      scoreCandidate(reference, `${assignment.courseName} ${assignment.name}`),
+      scoreCandidate(reference, `${assignment.courseCode || ""} ${assignment.name}`),
+    );
+    if (referenceScore >= 40) score = Math.max(score, 520 + referenceScore);
+  });
+
+  const milestone = assignment.name.match(/\b(?:milestone|assignment|assessment)\s*\d+(?:\.\d+)?\b/i)?.[0];
+  if (milestone && normalisedText.includes(normalise(milestone))) {
+    score = Math.max(score, 360 + scoreCandidate(text, assignment.name));
+  }
+
+  return score;
+}
+
+function bestRecentAssignmentAnchor(input: StudyAgentInput, assignments: CanvasAssignmentSummary[]) {
+  const recent = (input.recentMessages || [])
+    .filter((message) => message.content && message.content !== "__sidekick_working__")
+    .slice(-8)
+    .reverse();
+
+  const scored = recent
+    .flatMap((message, index) =>
+      assignments.map((assignment) => ({
+        assignment,
+        score:
+          assignmentAnchorScore(message.content, assignment) +
+          (message.role === "user" ? 90 : 35) +
+          Math.max(0, 70 - index * 12) +
+          Math.max(0, urgencyMatchBonus(assignment)),
+      })),
+    )
+    .filter((item) => item.score >= 400)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return normalise(right.assignment.name).length - normalise(left.assignment.name).length;
+    });
+
+  if (!scored[0]) return null;
+  if (scored[1] && scored[0].score - scored[1].score < 18) {
+    const currentMessageScore = (assignment: CanvasAssignmentSummary) => scoreCandidate(input.message, assignment.name);
+    if (currentMessageScore(scored[0].assignment) <= currentMessageScore(scored[1].assignment)) return null;
+  }
+  return scored[0].assignment;
+}
+
 function urgencyMatchBonus(assignment: CanvasAssignmentSummary) {
   if (isSubmitted(assignment)) return -30;
   let score = 0;
@@ -445,8 +519,13 @@ function bestContextualAssignment(
     : input.assignments;
   if (!candidates.length) return null;
 
+  const recentAnchor = options.allowRecentContext ? bestRecentAssignmentAnchor(input, candidates) : null;
+  if (hasPronounReference(input.message) && recentAnchor) return recentAnchor;
+
   const direct = bestAssignmentMatch(input.message, candidates);
   if (direct) return direct;
+
+  if (recentAnchor) return recentAnchor;
 
   const referenceText = options.allowRecentContext ? assignmentReferenceText(input) : input.message;
   const contextual = options.allowRecentContext ? bestAssignmentMatch(referenceText, candidates) : null;

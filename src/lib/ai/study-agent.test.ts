@@ -59,6 +59,19 @@ const assignments: CanvasAssignmentSummary[] = [
     priorityLabel: "critical",
     workflowState: "unsubmitted",
   },
+  {
+    id: "aws-milestone-21",
+    courseId: "cloud",
+    canvasAssignmentId: 5,
+    courseName: "Cloud Foundations (2610)",
+    courseCode: "COSC2757",
+    name: "Milestone 2.1 (AWS cloud implementation)",
+    description: "Complete the earlier AWS cloud implementation milestone.",
+    assignmentType: "external_tool",
+    dueStatus: "overdue",
+    priorityLabel: "high",
+    workflowState: "unsubmitted",
+  },
 ];
 
 describe("study agent matching", () => {
@@ -125,6 +138,32 @@ describe("study agent matching", () => {
         ],
       } as never,
       null,
+      { allowRecentContext: true },
+    );
+    expect(match?.id).toBe("aws-milestone");
+  });
+
+  it("anchors follow-up dashboard actions to the current focus session assignment", () => {
+    const match = __studyAgentTest.bestContextualAssignment(
+      {
+        message: "can u remove it from dashboard since ive finished it already",
+        assignments,
+        courses,
+        dashboard: { priorityItems: assignments, dueToday: [assignments[3]], dueThisWeek: [], unsubmitted: assignments },
+        recentMessages: [
+          {
+            role: "user",
+            content:
+              "Help me with this focus session: Cloud Foundations (2610) - Milestone 2.2 AWS Academy Labs and Activities Sprint. Current block: Decode the brief. Tasks: Open the Canvas assignment page.",
+          },
+          {
+            role: "assistant",
+            content:
+              "One-sentence summary: complete six AWS Academy labs and two activities for Milestone 2.2 AWS Academy Labs and Activities.",
+          },
+        ],
+      } as never,
+      courses[1],
       { allowRecentContext: true },
     );
     expect(match?.id).toBe("aws-milestone");
