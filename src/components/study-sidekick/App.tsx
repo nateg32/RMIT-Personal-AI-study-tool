@@ -819,7 +819,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           id: pendingId,
           role: "assistant",
           createdAt: now,
-          content: "Give me a sec. I'm checking Canvas, uploaded materials, and the priority list.",
+          content: "__sidekick_working__",
         },
       ]);
       setChatDraft("");

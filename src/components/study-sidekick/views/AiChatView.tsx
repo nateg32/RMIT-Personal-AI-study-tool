@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { CourseSummary, StudyAgentConfirmation, StudySidekickActions } from "../types";
 import { fileSizeLabel } from "../lib/client-utils";
@@ -55,6 +55,159 @@ const suggestions = [
     icon: "construction",
   },
 ];
+
+function thinkingWorkflow(message?: string) {
+  const lower = (message || "").toLowerCase();
+  if (/(announcement|announc|lecturer|posted|update)/i.test(lower)) {
+    return {
+      title: "Checking announcements",
+      icon: "campaign",
+      steps: [
+        "Understanding what update you need",
+        "Looking through recent announcements",
+        "Matching posts to your courses",
+        "Checking if anything changes your priorities",
+        "Preparing the useful bits only",
+      ],
+    };
+  }
+  if (/(due|deadline|week|today|tomorrow|overdue|priority|focus)/i.test(lower)) {
+    return {
+      title: "Ranking your priorities",
+      icon: "event",
+      steps: [
+        "Understanding the task",
+        "Checking due dates and submission status",
+        "Sorting work by urgency and risk",
+        "Looking for relevant files or notes",
+        "Turning it into a clear next move",
+      ],
+    };
+  }
+  if (/(file|lecture|slide|material|upload|document|pdf|brief)/i.test(lower)) {
+    return {
+      title: "Reading study context",
+      icon: "folder_open",
+      steps: [
+        "Understanding the question",
+        "Finding matching course material",
+        "Checking uploaded files and Canvas resources",
+        "Pulling out useful study signals",
+        "Building a grounded answer",
+      ],
+    };
+  }
+  if (/(session|plan|study|timer|break|battle)/i.test(lower)) {
+    return {
+      title: "Building the plan",
+      icon: "psychology",
+      steps: [
+        "Understanding the assignment",
+        "Checking Canvas facts and rubrics",
+        "Finding relevant lectures or files",
+        "Breaking work into small blocks",
+        "Making the plan timer-ready",
+      ],
+    };
+  }
+  return {
+    title: "Thinking with context",
+    icon: "auto_awesome",
+    steps: [
+      "Understanding your question",
+      "Checking synced Canvas facts",
+      "Looking at uploaded materials",
+      "Separating facts from guesses",
+      "Writing a useful answer",
+    ],
+  };
+}
+
+function isThinkingMessage(message: ChatMessage) {
+  return (
+    message.role === "assistant" &&
+    !message.provider &&
+    !message.confirmation &&
+    (message.content === "__sidekick_working__" || message.content.startsWith("Give me a sec."))
+  );
+}
+
+function previousUserMessage(messages: ChatMessage[], index: number) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor]?.role === "user") return messages[cursor].content;
+  }
+  return "";
+}
+
+function SidekickWorking({ userMessage }: { userMessage?: string }) {
+  const workflow = thinkingWorkflow(userMessage);
+  const [activeStep, setActiveStep] = useState(0);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setActiveStep((current) => (current + 1) % workflow.steps.length);
+    }, 1150);
+    return () => window.clearInterval(interval);
+  }, [workflow.steps.length]);
+
+  const progress = ((activeStep + 1) / workflow.steps.length) * 100;
+
+  return (
+    <div className="w-full min-w-[min(34rem,78vw)] whitespace-normal">
+      <div className="flex items-start gap-sm">
+        <div className="relative mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-primary-fixed-dim bg-primary-container">
+          <span className="material-symbols-outlined text-primary text-[20px]">{workflow.icon}</span>
+          <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-ping rounded-full bg-primary/45" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-xs">
+            <p className="font-label-lg text-label-lg font-bold text-[#352D53]">{workflow.title}</p>
+            <span className="inline-flex items-center gap-1">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="h-1.5 w-1.5 rounded-full bg-primary/70"
+                  style={{ animation: `pulse 1.2s ease-in-out ${dot * 0.18}s infinite` }}
+                />
+              ))}
+            </span>
+          </div>
+          <p className="mt-1 font-body-sm text-body-sm text-[#5D4E8B]">
+            Sidekick is checking the useful context, then it will answer from facts.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-md overflow-hidden rounded-full bg-white/70">
+        <div className="h-2 rounded-full bg-primary transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
+      </div>
+
+      <div className="mt-md grid gap-xs">
+        {workflow.steps.map((step, index) => {
+          const isDone = index < activeStep;
+          const isActive = index === activeStep;
+          return (
+            <div
+              key={step}
+              className={`flex items-center gap-xs rounded-full px-sm py-xs transition-all ${
+                isActive
+                  ? "bg-white text-primary shadow-sm"
+                  : isDone
+                    ? "bg-primary-container/55 text-primary"
+                    : "bg-transparent text-[#5D4E8B]/70"
+              }`}
+            >
+              <span className={`material-symbols-outlined text-[17px] ${isActive ? "animate-pulse" : ""}`}>
+                {isDone ? "check_circle" : isActive ? "radio_button_checked" : "radio_button_unchecked"}
+              </span>
+              <span className="font-label-md text-label-md">{step}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function AiChatView({
   messages,
@@ -208,7 +361,7 @@ export default function AiChatView({
           </div>
 
           <div className="flex-grow overflow-y-auto p-md space-y-lg custom-scrollbar">
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <div
                 key={message.id}
                 className={`flex items-start gap-md ${message.role === "user" ? "justify-end" : "max-w-[88%]"}`}
@@ -227,7 +380,11 @@ export default function AiChatView({
                         : "bg-[#EBE7FF] rounded-tr-xl rounded-b-xl border-2 border-[#D1C4FF] text-[#352D53]"
                   }`}
                 >
-                  <p className="font-body-md text-body-md">{message.content}</p>
+                  {isThinkingMessage(message) ? (
+                    <SidekickWorking userMessage={previousUserMessage(messages, index)} />
+                  ) : (
+                    <p className="font-body-md text-body-md">{message.content}</p>
+                  )}
                   {message.role === "assistant" && message.provider ? (
                     <p className="mt-sm font-label-sm text-label-sm opacity-70">
                       {message.provider === "gemini"
