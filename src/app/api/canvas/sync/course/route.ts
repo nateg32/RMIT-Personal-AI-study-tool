@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 const bodySchema = z.object({
   canvasCourseId: z.number().int().positive(),
-  includeResources: z.boolean().optional(),
+  includeResources: z.boolean().optional().default(false),
 });
 
 export async function POST(request: Request) {

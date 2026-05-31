@@ -29,7 +29,7 @@ export function SyncButton() {
               const response = await fetch("/api/canvas/sync/course", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ canvasCourseId: course.canvasCourseId, includeResources: true }),
+                body: JSON.stringify({ canvasCourseId: course.canvasCourseId, includeResources: false }),
               });
               const data = await response.json().catch(() => ({}));
               if (response.ok) {
@@ -54,7 +54,12 @@ export function SyncButton() {
               }),
             });
 
-            setMessage(`Synced ${successfulCourses}/${prepared.courses?.length || 0} courses`);
+            const totalCourses = prepared.courses?.length || 0;
+            setMessage(
+              totalCourses > 0 && successfulCourses === 0
+                ? `Sync could not finish any courses. ${warnings[0] || "Try again from the dashboard."}`
+                : `Synced ${successfulCourses}/${totalCourses} courses`,
+            );
           });
         }}
       >

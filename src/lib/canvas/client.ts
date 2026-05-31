@@ -239,6 +239,11 @@ export class CanvasClient {
 
       const data = (await response.json()) as T;
       return { data, next: this.getNextLink(response.headers.get("link")) };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`Canvas request timed out after ${this.timeoutMs}ms`);
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }

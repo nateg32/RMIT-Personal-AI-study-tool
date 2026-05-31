@@ -399,7 +399,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             method: "POST",
             body: JSON.stringify({
               canvasCourseId: course.canvasCourseId,
-              includeResources: true,
+              includeResources: false,
             }),
           });
           successfulCourses += 1;
@@ -426,10 +426,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       });
 
       await refreshData();
-      const warningText = warnings.length ? ` ${warnings.length} course warnings were kept so the sync could finish.` : "";
-      setActionMessage(
-        `Canvas sync complete: ${successfulCourses}/${courseCount} courses synced, ${changes.length} changes detected.${warningText}`,
-      );
+      if (syncError) {
+        const detail = warnings[0] ? ` ${warnings[0]}` : "";
+        setActionMessage(`Canvas sync could not finish any courses.${detail}`);
+      } else {
+        const warningText = warnings.length ? ` ${warnings.length} course warnings were kept so the sync could finish.` : "";
+        setActionMessage(
+          `Canvas sync complete: ${successfulCourses}/${courseCount} courses synced, ${changes.length} changes detected.${warningText}`,
+        );
+      }
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Canvas sync failed.");
     } finally {

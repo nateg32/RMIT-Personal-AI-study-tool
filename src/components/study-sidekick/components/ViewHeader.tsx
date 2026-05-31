@@ -13,6 +13,10 @@ export default function ViewHeader({
   title = "Study Command Centre",
   actions,
 }: ViewHeaderProps) {
+  const isErrorMessage = actions.actionMessage
+    ? /failed|error|could not|timed out|timeout|too many|not connected/i.test(actions.actionMessage)
+    : false;
+
   return (
     <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-md mb-lg -mx-margin-desktop px-margin-desktop py-md">
       <div className="flex justify-between items-center w-full max-w-7xl mx-auto">
@@ -50,8 +54,14 @@ export default function ViewHeader({
       </div>
       {actions.actionMessage ? (
         <div className="max-w-7xl mx-auto mt-sm" aria-live="polite" role="status">
-          <p className="soft-status-pill inline-flex max-w-full items-center gap-xs rounded-full border-2 border-primary-fixed-dim bg-primary-container/45 px-sm py-xs font-label-md text-label-md text-primary">
-            <span className="status-dot h-2 w-2 shrink-0 rounded-full bg-primary" />
+          <p
+            className={`soft-status-pill inline-flex max-w-full items-center gap-xs rounded-full border-2 px-sm py-xs font-label-md text-label-md ${
+              isErrorMessage
+                ? "border-tertiary bg-tertiary-container/50 text-on-tertiary-container"
+                : "border-primary-fixed-dim bg-primary-container/45 text-primary"
+            }`}
+          >
+            <span className={`status-dot h-2 w-2 shrink-0 rounded-full ${isErrorMessage ? "bg-tertiary" : "bg-primary"}`} />
             <span className="truncate">{actions.actionMessage}</span>
           </p>
         </div>
