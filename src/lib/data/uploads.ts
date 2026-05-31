@@ -8,6 +8,7 @@ import { stripCanvasHtml } from "@/lib/security/html";
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const MAX_GEMINI_INLINE_BYTES = 4 * 1024 * 1024;
 const MAX_INDEXED_TEXT = 24_000;
+const MAX_NOTES_WORDS = 500;
 
 const textContentTypes = new Set([
   "application/json",
@@ -185,6 +186,10 @@ function cleanText(value: string) {
     .slice(0, MAX_INDEXED_TEXT);
 }
 
+function wordCount(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
 async function extractIndexedText(file: File, buffer: Buffer) {
   if (isTextLike(file)) return cleanText(buffer.toString("utf8"));
   if (isDocx(file)) {
@@ -213,7 +218,7 @@ export async function createUploadedMaterial({
   notes?: string;
 }) {
   if (file && file.size > MAX_UPLOAD_BYTES) {
-    throw new Error("File is too large for a Vercel upload. Upload a file under 4 MB, or paste the key brief/notes instead.");
+    throw new Error("File is too large for Vercel upload limits. Upload files one at a time under 4 MB, or paste the key brief/notes instead.");
   }
 
   const db = getDb();
@@ -246,6 +251,9 @@ export async function createUploadedMaterial({
   const contentType = file ? inferredContentType(file) : "text/plain";
   const extractedText = file && fileBuffer ? await extractIndexedText(file, fileBuffer) : null;
   const cleanedNotes = notes ? cleanText(notes) : null;
+  if (cleanedNotes && wordCount(cleanedNotes) > MAX_NOTES_WORDS) {
+    throw new Error(`Notes are limited to ${MAX_NOTES_WORDS} words. Trim the text to the key brief, rubric, or lecture points.`);
+  }
   const name = (file?.name || title || "Manual study material").slice(0, 180);
   const geminiFile =
     file && fileBuffer && isGeminiReadable(file) && file.size <= MAX_GEMINI_INLINE_BYTES

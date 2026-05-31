@@ -11,6 +11,10 @@ type FilesViewProps = {
   actions: StudySidekickActions;
 };
 
+const MAX_FILES = 2;
+const MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024;
+const NOTE_WORD_LIMIT = 500;
+
 function fileIcon(contentType?: string | null) {
   if (contentType?.includes("pdf")) return "picture_as_pdf";
   if (contentType?.includes("image")) return "image";
@@ -23,47 +27,106 @@ function openCanvas(url?: string | null) {
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
 
+function wordCount(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function limitWords(value: string, limit: number) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= limit) return value;
+  return words.slice(0, limit).join(" ");
+}
+
 export default function FilesView({ files, courses, actions }: FilesViewProps) {
-  const [search, setSearch] = useState("");
-  const [mode, setMode] = useState<"recent" | "course">("recent");
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadNotes, setUploadNotes] = useState("");
   const [uploadCourseId, setUploadCourseId] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const actionsDisabled = Boolean(actions.isBusy);
-  const visibleFiles = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return files.filter((file) =>
-      query
-        ? `${file.name} ${file.courseName} ${file.assignmentName || ""} ${file.contentType || ""} ${file.excerpt || ""}`
-            .toLowerCase()
-            .includes(query)
-        : true,
-    );
-  }, [files, search]);
-  const grouped = useMemo(() => {
-    const map = new Map<string, FileSummary[]>();
-    for (const file of visibleFiles) {
-      map.set(file.courseName, [...(map.get(file.courseName) || []), file]);
+  const selectedCourse = courses.find((course) => course.id === uploadCourseId);
+  const noteWords = wordCount(uploadNotes);
+  const oversizedFiles = uploadFiles.filter((file) => file.size > MAX_FILE_SIZE_BYTES);
+  const hasMaterial = uploadFiles.length > 0 || Boolean(uploadNotes.trim());
+  const canUpload =
+    Boolean(uploadCourseId) &&
+    hasMaterial &&
+    !oversizedFiles.length &&
+    !isUploading &&
+    !actionsDisabled &&
+    Boolean(actions.onUploadMaterial);
+
+  const recentMaterials = useMemo(
+    () =>
+      [...files]
+        .sort((left, right) => {
+          const leftTime = new Date(left.createdAt || left.updatedAtCanvas || 0).getTime();
+          const rightTime = new Date(right.createdAt || right.updatedAtCanvas || 0).getTime();
+          return rightTime - leftTime;
+        })
+        .slice(0, 8),
+    [files],
+  );
+
+  const materialCountByCourse = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of files) {
+      counts.set(file.courseName, (counts.get(file.courseName) || 0) + 1);
     }
-    return Array.from(map.entries());
-  }, [visibleFiles]);
+    return counts;
+  }, [files]);
+
+  const selectFiles = (fileList: FileList | null) => {
+    const nextFiles = Array.from(fileList || []).slice(0, MAX_FILES);
+    setUploadFiles(nextFiles);
+    setLocalMessage(fileList && fileList.length > MAX_FILES ? "Only the first two files were selected." : null);
+  };
+
+  const removeSelectedFile = (name: string) => {
+    setUploadFiles((current) => current.filter((file) => file.name !== name));
+    setFileInputKey((current) => current + 1);
+  };
+
+  const updateNotes = (value: string) => {
+    const limited = limitWords(value, NOTE_WORD_LIMIT);
+    setUploadNotes(limited);
+    setLocalMessage(wordCount(value) > NOTE_WORD_LIMIT ? `Notes are limited to ${NOTE_WORD_LIMIT} words.` : null);
+  };
 
   const uploadMaterial = async () => {
-    if (!actions.onUploadMaterial || isUploading || actionsDisabled) return;
+    if (!actions.onUploadMaterial || isUploading || !canUpload) return;
     setIsUploading(true);
+    setLocalMessage(null);
     try {
-      await actions.onUploadMaterial({
-        file: uploadFile,
-        title: uploadTitle,
-        notes: uploadNotes,
-        courseId: uploadCourseId || undefined,
-      });
-      setUploadFile(null);
+      const notes = uploadNotes.trim();
+      const title = uploadTitle.trim();
+
+      if (uploadFiles.length) {
+        for (let index = 0; index < uploadFiles.length; index += 1) {
+          await actions.onUploadMaterial({
+            file: uploadFiles[index],
+            title: index === 0 ? title : undefined,
+            notes: index === 0 ? notes : undefined,
+            courseId: uploadCourseId,
+          });
+        }
+      } else {
+        await actions.onUploadMaterial({
+          title: title || `${selectedCourse?.name || "Course"} notes`,
+          notes,
+          courseId: uploadCourseId,
+        });
+      }
+
+      setUploadFiles([]);
       setUploadTitle("");
       setUploadNotes("");
-      setUploadCourseId("");
+      setFileInputKey((current) => current + 1);
+      setLocalMessage(`Saved to ${selectedCourse?.name || "this course"}. Sidekick can now use it in chat and study sessions.`);
+    } catch (error) {
+      setLocalMessage(error instanceof Error ? error.message : "Upload failed. Try a smaller file or paste notes instead.");
     } finally {
       setIsUploading(false);
     }
@@ -79,213 +142,208 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
 
   return (
     <div className="px-margin-desktop pb-lg min-h-screen w-full relative">
-      <ViewHeader
-        searchPlaceholder="Search your files..."
-        searchValue={search}
-        onSearchChange={setSearch}
-        actions={actions}
-      />
+      <ViewHeader actions={actions} />
 
-      <section className="mb-lg">
-        <div className="flex flex-wrap gap-sm">
-          <button
-            type="button"
-            className={`px-lg py-sm rounded-full font-label-md text-label-md bubbly-button shadow-sm ${
-              mode === "recent" ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
-            }`}
-            onClick={() => setMode("recent")}
-          >
-            Recent
-          </button>
-          <button
-            type="button"
-            className={`px-lg py-sm rounded-full font-label-md text-label-md bubbly-button ${
-              mode === "course" ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container text-on-surface-variant"
-            }`}
-            onClick={() => setMode("course")}
-          >
-            By Course
-          </button>
-          <button
-            type="button"
-            className="px-lg py-sm bg-secondary-container text-on-secondary-container rounded-full font-label-md text-label-md bubbly-button hover:bg-secondary-fixed transition-colors"
-            onClick={() => actions.onOpenChat("Which recent Canvas files should I read first?")}
-          >
-            Ask AI
-          </button>
-          <button
-            type="button"
-            className="px-lg py-sm bg-surface-container text-on-surface-variant rounded-full font-label-md text-label-md bubbly-button border-2 border-outline-variant hover:border-primary transition-colors disabled:opacity-60"
-            onClick={actions.onSyncCanvas}
-            disabled={actionsDisabled}
-            title={actions.disabledReason || undefined}
-          >
-            Refresh files
-          </button>
-        </div>
+      <section className="max-w-7xl mx-auto mb-lg">
+        <p className="font-label-md text-label-md uppercase tracking-wide text-primary mb-xs">Course material</p>
+        <h1 className="font-display-md text-display-md text-primary mb-sm">Add context for Sidekick</h1>
+        <p className="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">
+          Choose one course, add up to two files, or paste a short brief. Sidekick uses this material only to explain
+          requirements, suggest where to start, and build better study sessions for that course.
+        </p>
       </section>
 
-      <section className="mb-lg grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-gutter max-w-7xl mx-auto w-full">
-        <div className="sticky-note bg-primary-container/25 border-2 border-primary-fixed-dim rounded-lg p-md">
-          <div className="flex items-center gap-sm mb-sm">
+      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,760px)_minmax(320px,420px)] gap-gutter max-w-7xl mx-auto w-full mb-xl">
+        <form
+          className="bg-surface-container-lowest border-2 border-primary-fixed-dim rounded-lg p-md shadow-sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void uploadMaterial();
+          }}
+        >
+          <div className="flex items-center gap-sm mb-md">
             <span className="material-symbols-outlined text-primary">upload_file</span>
             <h2 className="font-headline-md text-headline-md text-primary">Upload study material</h2>
           </div>
-          <p className="font-body-md text-body-md text-on-surface-variant mb-md max-w-3xl">
-            Add assignment briefs, lecture notes, rubric text, slides, PDFs, or screenshots when Canvas file syncing is slow. Text and DOCX are indexed locally; small PDFs, images, and PowerPoint files are attached to Gemini for deeper reading during chat and new study sessions.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
-            <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">File</span>
-              <input
-                type="file"
-                className="font-label-md text-label-md min-w-0"
-                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.ppt,.pptx,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,text/*,image/*,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
-              />
-            </label>
-            <label className="bg-white border-2 border-surface-variant rounded-lg p-sm flex flex-col gap-xs">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Course</span>
+
+          <div className="space-y-md">
+            <label className="block">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase">Course</span>
               <select
                 value={uploadCourseId}
                 onChange={(event) => setUploadCourseId(event.target.value)}
-                className="bg-transparent font-body-md focus:outline-none"
+                className="mt-xs w-full bg-white border-2 border-surface-variant rounded-full px-md py-sm font-body-md focus:outline-none focus:border-primary"
+                required
               >
-                <option value="">Manual library</option>
+                <option value="">Choose the course this material belongs to</option>
                 {courses.map((course) => (
                   <option key={course.id} value={course.id}>
-                    {course.courseCode || course.name}: {course.name}
+                    {course.courseCode || "Course"} - {course.name}
                   </option>
                 ))}
               </select>
             </label>
+
+            <div className="rounded-lg border-2 border-dashed border-primary-fixed-dim bg-primary-container/20 p-md">
+              <label className="flex cursor-pointer flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Files</span>
+                <span className="font-body-md text-body-md text-on-surface-variant">
+                  Add up to {MAX_FILES} files. Keep each file under 4 MB so Vercel does not reject the upload.
+                </span>
+                <input
+                  key={fileInputKey}
+                  type="file"
+                  multiple
+                  className="mt-sm font-label-md text-label-md min-w-0"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.ppt,.pptx,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,text/*,image/*,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(event) => selectFiles(event.target.files)}
+                />
+              </label>
+
+              {uploadFiles.length ? (
+                <div className="mt-sm space-y-xs">
+                  {uploadFiles.map((file) => (
+                    <div
+                      key={`${file.name}-${file.size}`}
+                      className="flex items-center justify-between gap-sm rounded-full border border-surface-variant bg-white px-sm py-xs"
+                    >
+                      <span className="min-w-0 truncate font-label-md text-label-md">
+                        {file.name} <span className="text-on-surface-variant">({fileSizeLabel(file.size)})</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-full px-xs py-1 text-primary hover:bg-primary-container active:scale-95"
+                        onClick={() => removeSelectedFile(file.name)}
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">close</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {oversizedFiles.length ? (
+                <p className="mt-sm font-label-md text-label-md text-error">
+                  {oversizedFiles[0].name} is too large. Use a smaller file or paste the key notes below.
+                </p>
+              ) : null}
+            </div>
+
+            <label className="block">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase">Material title</span>
+              <input
+                value={uploadTitle}
+                onChange={(event) => setUploadTitle(event.target.value.slice(0, 180))}
+                placeholder="Optional, for example Assignment 2 rubric notes"
+                className="mt-xs w-full bg-white border-2 border-surface-variant rounded-full px-md py-sm font-body-md focus:outline-none focus:border-primary"
+              />
+            </label>
+
+            <label className="block">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase">Extra notes</span>
+              <textarea
+                value={uploadNotes}
+                onChange={(event) => updateNotes(event.target.value)}
+                placeholder="Paste only the useful instructions, rubric points, or lecture hints. Do not paste a full assignment answer."
+                className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-32 resize-y"
+              />
+              <span className="mt-xs block text-right font-label-sm text-label-sm text-on-surface-variant">
+                {noteWords}/{NOTE_WORD_LIMIT} words
+              </span>
+            </label>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-[0.8fr_1.2fr] gap-sm mt-sm">
-            <input
-              value={uploadTitle}
-              onChange={(event) => setUploadTitle(event.target.value)}
-              placeholder="Optional title if you are pasting notes only"
-              className="bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
-            />
-            <textarea
-              value={uploadNotes}
-              onChange={(event) => setUploadNotes(event.target.value)}
-              placeholder="Optional: paste any extra brief/rubric/lecture highlights, especially for large or blurry PDFs, slides, or screenshots..."
-              className="bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary min-h-24 resize-y"
-            />
-          </div>
+
+          {localMessage ? (
+            <p className="mt-md rounded-full border border-primary-fixed-dim bg-primary-container/35 px-sm py-xs font-label-md text-label-md text-primary">
+              {localMessage}
+            </p>
+          ) : null}
+
           <button
-            type="button"
-            className="mt-md bg-primary text-on-primary px-lg py-sm rounded-full font-label-md text-label-md bubbly-button disabled:opacity-60"
-            onClick={uploadMaterial}
-            disabled={isUploading || actionsDisabled || !actions.onUploadMaterial || (!uploadFile && !uploadNotes.trim())}
+            type="submit"
+            className="mt-md w-full bg-primary text-on-primary px-lg py-sm rounded-full font-label-md text-label-md bubbly-button disabled:opacity-60"
+            disabled={!canUpload}
             title={actions.disabledReason || undefined}
           >
-            {isUploading ? "Indexing..." : "Save to AI materials"}
+            {isUploading ? "Saving material..." : "Save to Sidekick"}
           </button>
-        </div>
+        </form>
 
-        <div className="sticky-note bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md">
+        <aside className="bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md shadow-sm h-fit">
           <div className="flex items-center gap-sm mb-sm">
-            <span className="material-symbols-outlined text-secondary">tips_and_updates</span>
-            <h2 className="font-headline-sm text-headline-sm">Cheapest path</h2>
+            <span className="material-symbols-outlined text-primary">verified_user</span>
+            <h2 className="font-headline-sm text-headline-sm text-primary">Study guidance only</h2>
           </div>
-          <p className="font-body-md text-body-md text-on-surface-variant">
-            Manual uploads are cheaper than forcing Canvas to fetch every file. PDFs, slides, and images under 4 MB can be deep-read by Gemini; huge files should be trimmed or summarised first so chat stays fast.
+          <p className="font-body-md text-body-md text-on-surface-variant mb-md">
+            The purpose of this is for AI to understand your assignment, rubric, and course context so it can give you
+            directions on how to start or attempt the task.
           </p>
-        </div>
+          <p className="font-body-md text-body-md text-on-surface-variant mb-md">
+            It is not for final answers, copy-paste submissions, or replacing your own work. Keep uploads focused on the
+            brief, marking criteria, lecture notes, and anything that helps you plan honestly.
+          </p>
+          <div className="rounded-lg bg-primary-container/25 border border-primary-fixed-dim p-sm">
+            <p className="font-label-md text-label-md text-primary">Current limits</p>
+            <ul className="mt-xs space-y-xs font-body-sm text-body-sm text-on-surface-variant">
+              <li>Course must be selected.</li>
+              <li>Maximum {MAX_FILES} files per upload.</li>
+              <li>Maximum {NOTE_WORD_LIMIT} words of notes.</li>
+              <li>Each file should stay under 4 MB.</li>
+            </ul>
+          </div>
+        </aside>
       </section>
 
-      {mode === "course" ? (
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter mb-xl relative z-10">
-          {grouped.map(([courseName, items], index) => (
-            <article
-              key={courseName}
-              className={`${index % 2 ? "bg-secondary-container/20 border-secondary-fixed-dim" : "bg-primary-container/30 border-primary-fixed-dim"} sticky-note border-2 p-md rounded-lg flex flex-col justify-between min-h-[220px]`}
-            >
-              <div>
-                <span className="material-symbols-outlined text-primary text-[48px] mb-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  folder
-                </span>
-                <h3 className="font-headline-md text-headline-md text-on-primary-container">{courseName}</h3>
-                <p className="font-label-md text-on-surface-variant">
-                  {items.length} files, latest {formatDateOnly(items[0]?.updatedAtCanvas)}
-                </p>
-              </div>
-              <div className="mt-lg flex -space-x-sm">
-                {items.slice(0, 3).map((file) => (
-                  <button
-                    key={file.id}
-                    type="button"
-                    className="w-8 h-8 rounded-full bg-white border-2 border-primary-container flex items-center justify-center text-[12px] font-bold"
-                    onClick={() => openFile(file)}
-                    title={file.name}
-                  >
-                    {fileIcon(file.contentType).slice(0, 3).toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </article>
-          ))}
-        </section>
-      ) : (
-        <section className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-gutter mb-xl relative z-10">
-          {visibleFiles.map((file, index) => (
-            <button
-              key={file.id}
-              type="button"
-              className={`sticky-note ${
-                index % 3 === 0
-                  ? "bg-surface-container-lowest border-secondary-container"
-                  : index % 3 === 1
-                    ? "bg-tertiary-container/40 border-tertiary-fixed-dim"
-                    : "bg-primary-container/20 border-primary-fixed-dim"
-              } border-2 p-md rounded-lg flex flex-col items-center text-center min-h-[190px]`}
-              onClick={() => openFile(file)}
-            >
-              <div className="w-20 h-20 bg-white/70 rounded-lg flex items-center justify-center mb-md">
-                <span className="material-symbols-outlined text-primary text-[40px]">{fileIcon(file.contentType)}</span>
-              </div>
-              <span className="mb-xs px-sm py-1 rounded-full bg-white/70 border border-surface-variant font-label-sm text-label-sm text-on-surface-variant">
-                {file.source === "manual_upload" ? "Manual" : "Canvas"}
-              </span>
-              <p className="font-label-md text-label-md font-bold mb-xs truncate w-full">{file.name}</p>
-              <p className="font-label-sm text-label-sm text-on-surface-variant truncate w-full">{file.courseName}</p>
-              {file.assignmentName ? (
-                <p className="font-label-sm text-label-sm text-secondary truncate w-full">{file.assignmentName}</p>
-              ) : null}
-              <p className="font-label-sm text-label-sm text-on-surface-variant">{fileSizeLabel(file.size)}</p>
-            </button>
-          ))}
-        </section>
-      )}
-
-      {!visibleFiles.length ? (
-        <section className="max-w-4xl mx-auto w-full">
-          <div className="drag-area p-xl rounded-lg bg-surface-container-low flex flex-col items-center justify-center text-center hover:border-primary hover:bg-primary-container/20 transition-all w-full">
-            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-md mb-md transform rotate-3">
-              <span className="material-symbols-outlined text-primary text-[48px]">cloud_sync</span>
-            </div>
-            <h3 className="font-headline-md text-headline-md text-primary mb-xs w-full">No study materials loaded yet</h3>
-            <p className="font-body-md text-on-surface-variant max-w-2xl w-full whitespace-normal">
-              Upload a brief or paste rubric notes above, or run a Canvas sync to pull recent files and module resources for your courses.
-            </p>
-            <button
-              type="button"
-              className="mt-lg bg-primary text-on-primary px-lg py-sm rounded-full font-label-md text-label-md bubbly-button"
-              onClick={actions.onSyncCanvas}
-            >
-              Sync Canvas
-            </button>
+      <section className="max-w-7xl mx-auto w-full">
+        <div className="mb-md flex flex-col gap-xs sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Saved material</p>
+            <h2 className="font-headline-md text-headline-md text-primary">Recent course context</h2>
           </div>
-        </section>
-      ) : null}
+          {files.length ? (
+            <p className="font-label-md text-label-md text-on-surface-variant">
+              {files.length} item{files.length === 1 ? "" : "s"} across {materialCountByCourse.size} course
+              {materialCountByCourse.size === 1 ? "" : "s"}
+            </p>
+          ) : null}
+        </div>
 
-      {courses.length && visibleFiles.length ? (
-        <p className="font-label-sm text-label-sm text-outline text-center">
-          Showing {visibleFiles.length} files across {courses.length} synced courses.
-        </p>
-      ) : null}
+        {recentMaterials.length ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-gutter">
+            {recentMaterials.map((file) => (
+              <button
+                key={file.id}
+                type="button"
+                className="bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md text-left transition-all hover:border-primary hover:-translate-y-0.5 active:scale-[0.99]"
+                onClick={() => openFile(file)}
+              >
+                <div className="flex items-start justify-between gap-sm">
+                  <span className="material-symbols-outlined text-primary text-[36px]">{fileIcon(file.contentType)}</span>
+                  <span className="rounded-full bg-primary-container/60 px-sm py-1 font-label-sm text-label-sm text-primary">
+                    {file.source === "manual_upload" ? "Manual" : "Canvas"}
+                  </span>
+                </div>
+                <p className="mt-md font-label-lg text-label-lg font-bold line-clamp-2">{file.name}</p>
+                <p className="mt-xs font-label-md text-label-md text-on-surface-variant line-clamp-1">{file.courseName}</p>
+                {file.assignmentName ? (
+                  <p className="mt-xs font-label-sm text-label-sm text-secondary line-clamp-1">{file.assignmentName}</p>
+                ) : null}
+                <p className="mt-sm font-label-sm text-label-sm text-on-surface-variant">
+                  {fileSizeLabel(file.size)} - {formatDateOnly(file.createdAt || file.updatedAtCanvas)}
+                </p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border-2 border-dashed border-outline-variant bg-surface-container-low p-lg text-center">
+            <span className="material-symbols-outlined text-primary text-[48px]">folder_open</span>
+            <h3 className="mt-sm font-headline-sm text-headline-sm text-primary">No material saved yet</h3>
+            <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
+              Choose a course above, then upload a brief or paste notes so Sidekick can understand what you are working on.
+            </p>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
