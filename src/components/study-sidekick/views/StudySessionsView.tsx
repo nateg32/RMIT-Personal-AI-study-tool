@@ -27,11 +27,28 @@ type StudySessionsViewProps = {
 
 const durationOptions = [25, 50, 90];
 const defaultDuration = 50;
+const memoryPadLabels = ["A", "B", "C", "D"];
+const memoryPatterns = [
+  [0, 2, 1],
+  [1, 3, 0, 2],
+  [2, 0, 3, 1, 2],
+  [3, 1, 0, 2, 3, 1],
+];
+const breakActivities = [
+  "Stand up and relax your shoulders.",
+  "Drink water and look away from the screen.",
+  "Walk around for two minutes.",
+  "Write one tiny note about what felt unclear.",
+  "Take five slow breaths before the next block.",
+];
 const defaultSessionSettings = {
   mode: "Plan assignment",
   energyLevel: "Medium",
   targetOutcome: "Credit",
 };
+
+type FocusStage = "brief" | "lock" | "focus" | "break";
+type BreakMode = "breathe" | "memory" | "activities";
 
 function clampMinutes(value: number) {
   return Math.max(5, Math.min(240, Number.isFinite(value) ? Math.round(value) : defaultDuration));
@@ -53,6 +70,10 @@ function minutesToClock(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
   const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${rest}`;
+}
+
+function buildMemoryPattern(length = 3) {
+  return memoryPatterns[Math.max(0, Math.min(memoryPatterns.length - 1, length - 3))];
 }
 
 function contextConfidenceForAssignment(assignment?: AssignmentSummary | null, plan?: StudyPlan) {
@@ -147,6 +168,12 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [showPlanEditor, setShowPlanEditor] = useState(false);
   const [focusFullscreen, setFocusFullscreen] = useState(false);
+  const [focusStage, setFocusStage] = useState<FocusStage>("brief");
+  const [breakMode, setBreakMode] = useState<BreakMode>("breathe");
+  const [breakSecondsLeft, setBreakSecondsLeft] = useState(0);
+  const [memoryRound, setMemoryRound] = useState(1);
+  const [memoryPattern, setMemoryPattern] = useState(() => buildMemoryPattern());
+  const [memoryInput, setMemoryInput] = useState<number[]>([]);
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: defaultDuration * 60, running: false });
   const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
   const [checklistDraft, setChecklistDraft] = useState("");
@@ -163,6 +190,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const safeActiveBlockIndex = Math.min(activeBlockIndex, Math.max(0, plan.blocks.length - 1));
   const activeBlock = plan.blocks[safeActiveBlockIndex] || plan.blocks[0];
   const totalSeconds = Math.max(60, (activeBlock?.minutes || duration) * 60);
+  const isLastBlock = safeActiveBlockIndex >= Math.max(0, plan.blocks.length - 1);
+  const activeBreakMinutes = activeBlock?.breakMinutes || (!isLastBlock ? 5 : 0);
   const timerKey = `${activeSession?.id || selectedAssignment?.id || "draft"}:${safeActiveBlockIndex}:${totalSeconds}`;
   const timer = useMemo(
     () => (timerState.key === timerKey ? timerState : { key: timerKey, secondsLeft: totalSeconds, running: false }),
@@ -173,7 +202,6 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const checklist = plan.checklist || [];
   const completedCount = checklist.filter((item) => completedMap[item]).length;
   const progressRatio = totalSeconds ? (totalSeconds - secondsLeft) / totalSeconds : 0;
-  const focusProgress = Math.round(progressRatio * 1131);
   const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
   const checklistText = checklist.join("\n");
   const actionsDisabled = Boolean(actions.isBusy);
@@ -188,6 +216,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     ...(plan.riskWarning ? [plan.riskWarning] : []),
     plan.nextAction,
   ].filter(Boolean).slice(0, 4);
+  const laterBlocks = plan.blocks.slice(safeActiveBlockIndex + 1, safeActiveBlockIndex + 4);
 
   useEffect(() => {
     if (!running) return;
@@ -205,6 +234,14 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   }, [running, timer, timerKey]);
 
   useEffect(() => {
+    if (focusStage !== "break" || breakSecondsLeft <= 0) return;
+    const interval = window.setInterval(() => {
+      setBreakSecondsLeft((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [breakSecondsLeft, focusStage]);
+
+  useEffect(() => {
     if (!activeSession || secondsLeft !== 0 || completedTimerKeys.current.has(timerKey)) return;
     completedTimerKeys.current.add(timerKey);
     void onUpdateSession(
@@ -213,9 +250,29 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
         ...plan,
         activeBlockIndex: safeActiveBlockIndex,
       },
-      "completed",
+      isLastBlock ? "completed" : "in_progress",
     ).catch(() => undefined);
-  }, [activeSession, onUpdateSession, plan, safeActiveBlockIndex, secondsLeft, timerKey]);
+    if (focusFullscreen) {
+      window.setTimeout(() => {
+        setFocusStage("break");
+        setBreakMode("breathe");
+        setBreakSecondsLeft(isLastBlock ? 0 : Math.max(60, activeBreakMinutes * 60));
+        setMemoryInput([]);
+        setMemoryRound(1);
+        setMemoryPattern(buildMemoryPattern());
+      }, 0);
+    }
+  }, [
+    activeBreakMinutes,
+    activeSession,
+    focusFullscreen,
+    isLastBlock,
+    onUpdateSession,
+    plan,
+    safeActiveBlockIndex,
+    secondsLeft,
+    timerKey,
+  ]);
 
   useEffect(() => {
     if (!focusFullscreen) return;
@@ -328,9 +385,58 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     setTimerState({ ...timer, running: !running });
   };
 
+  const startFocusTimer = () => {
+    if (actionsDisabled || !activeSession) return;
+    void onUpdateSession(
+      activeSession.id,
+      {
+        ...plan,
+        activeBlockIndex: safeActiveBlockIndex,
+      },
+      "in_progress",
+    ).catch(() => undefined);
+    setFocusStage("focus");
+    setTimerState({ ...timer, running: true });
+  };
+
+  const openFocusPreview = () => {
+    if (!activeSession || actionsDisabled) return;
+    setFocusStage("brief");
+    setFocusFullscreen(true);
+  };
+
   const resetTimer = () => {
     completedTimerKeys.current.delete(timerKey);
     setTimerState({ key: timerKey, secondsLeft: totalSeconds, running: false });
+  };
+
+  const continueAfterBreak = async () => {
+    if (isLastBlock) {
+      setFocusFullscreen(false);
+      setFocusStage("brief");
+      return;
+    }
+    await selectBlock(safeActiveBlockIndex + 1);
+    setBreakSecondsLeft(0);
+    setFocusStage("brief");
+    setMemoryInput([]);
+  };
+
+  const handleMemoryTap = (index: number) => {
+    const nextInput = [...memoryInput, index];
+    const isCorrect = nextInput.every((value, inputIndex) => value === memoryPattern[inputIndex]);
+    if (!isCorrect) {
+      setMemoryInput([]);
+      return;
+    }
+    if (nextInput.length === memoryPattern.length) {
+      const nextRound = memoryRound + 1;
+      setMemoryRound(nextRound);
+      setMemoryInput([]);
+      setMemoryPattern(buildMemoryPattern(Math.min(6, nextRound + 2)));
+      return;
+    }
+    setMemoryInput(nextInput);
   };
 
   const askAboutSession = () => {
@@ -344,76 +450,242 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
       {focusFullscreen ? (
         <div className="fixed inset-0 z-50 flex min-h-[100dvh] overflow-hidden bg-background text-on-surface">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(205,239,184,0.55),transparent_42%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(205,239,184,0.42),transparent_48%)]" />
           <button
             type="button"
-            className="absolute right-lg top-lg z-10 inline-flex min-w-16 items-center justify-center rounded-full border-2 border-primary-fixed-dim bg-white/90 px-md py-xs font-label-md text-label-md text-primary bubbly-button"
+            className="absolute right-md top-md z-10 rounded-full border border-primary-fixed-dim bg-white/90 px-sm py-xs font-label-md text-label-md text-primary"
             onClick={() => setFocusFullscreen(false)}
           >
             Exit
           </button>
-          <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-5xl flex-col items-center justify-center gap-md px-lg py-xl text-center">
-            <p className="font-label-md text-label-md uppercase tracking-widest text-on-surface-variant">
-              {running ? "Focus mode" : "Ready when you are"}
-            </p>
-            <div className="relative h-[min(72vw,26rem)] w-[min(72vw,26rem)] max-h-[26rem] max-w-[26rem]">
-              <svg className="h-full w-full -rotate-90">
-                <circle className="text-surface-variant" cx="50%" cy="50%" fill="transparent" r="45%" stroke="currentColor" strokeWidth="14" />
-                <circle
-                  className="text-primary"
-                  cx="50%"
-                  cy="50%"
-                  fill="transparent"
-                  r="45%"
-                  stroke="currentColor"
-                  strokeDasharray="1131"
-                  strokeDashoffset={Math.max(0, 1131 - focusProgress)}
-                  strokeLinecap="round"
-                  strokeWidth="14"
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-display-lg text-[clamp(4.5rem,10vw,7.5rem)] leading-none text-primary">
-                  {minutesToClock(secondsLeft)}
-                </span>
-                <p className="mt-sm w-[72%] max-w-[18rem] text-balance break-words font-headline-md text-headline-md leading-tight text-on-surface">
-                  {activeBlock?.name || "Focus time"}
-                </p>
-              </div>
-            </div>
-            {activeBlock?.tasks?.[0] ? (
-              <p className="max-w-2xl rounded-full border-2 border-primary-fixed-dim bg-white/80 px-lg py-sm font-body-lg text-body-lg text-on-surface-variant">
-                {activeBlock.tasks[0]}
+
+          {focusStage === "brief" ? (
+            <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-4xl flex-col justify-center px-lg py-xl">
+              <p className="font-label-md text-label-md uppercase tracking-widest text-primary">Before you start</p>
+              <h2 className="mt-xs max-w-3xl font-display-md text-display-md text-primary">{plan.title}</h2>
+              <p className="mt-sm max-w-3xl font-body-lg text-body-lg text-on-surface-variant">
+                This session starts with <strong>{activeBlock?.name || "your first focus block"}</strong>. Aim for progress,
+                not perfection.
               </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-center gap-sm">
-              {selectedAssignment?.htmlUrl ? (
+
+              <div className="mt-lg grid grid-cols-1 gap-md md:grid-cols-2">
+                <section className="rounded-lg border-2 border-primary-fixed-dim bg-white/85 p-md">
+                  <h3 className="font-headline-sm text-headline-sm">Get done now</h3>
+                  <ul className="mt-sm space-y-xs">
+                    {(activeBlock?.tasks?.length ? activeBlock.tasks : [plan.nextAction]).slice(0, 4).map((task) => (
+                      <li key={task} className="flex gap-xs font-body-md text-body-md text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
+                        <span>{task}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+                <section className="rounded-lg border-2 border-surface-variant bg-white/75 p-md">
+                  <h3 className="font-headline-sm text-headline-sm">Do later</h3>
+                  <ul className="mt-sm space-y-xs">
+                    {(laterBlocks.length ? laterBlocks : plan.blocks.slice(1, 3)).map((block) => (
+                      <li key={block.name} className="flex gap-xs font-body-md text-body-md text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[18px] text-primary">arrow_right</span>
+                        <span>
+                          {block.name} <span className="text-outline">({block.minutes}m)</span>
+                        </span>
+                      </li>
+                    ))}
+                    {!laterBlocks.length && plan.blocks.length <= 1 ? (
+                      <li className="font-body-md text-body-md text-on-surface-variant">Wrap up and write the next action.</li>
+                    ) : null}
+                  </ul>
+                </section>
+              </div>
+
+              <div className="mt-lg flex flex-wrap gap-sm">
+                {selectedAssignment?.htmlUrl ? (
+                  <button
+                    type="button"
+                    className="rounded-full border-2 border-primary-fixed-dim bg-white px-lg py-sm font-label-md text-label-md text-primary"
+                    onClick={() => window.open(selectedAssignment.htmlUrl || undefined, "_blank", "noopener,noreferrer")}
+                  >
+                    Open Canvas brief
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="bubbly-button inline-flex min-w-48 items-center justify-center rounded-full border-2 border-primary-fixed-dim bg-white px-lg py-sm font-label-md text-label-md text-on-surface"
-                  onClick={() => window.open(selectedAssignment.htmlUrl || undefined, "_blank", "noopener,noreferrer")}
+                  className="bubbly-button rounded-full bg-primary px-xl py-sm font-bold text-on-primary shadow-lg"
+                  onClick={() => setFocusStage("lock")}
                 >
-                  Open Canvas brief
+                  I am ready
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="bubbly-button inline-flex min-w-36 items-center justify-center gap-xs rounded-full bg-primary px-lg py-md font-bold text-on-primary shadow-lg"
-                onClick={toggleTimer}
-              >
-                <span className="material-symbols-outlined">{running ? "pause_circle" : "play_circle"}</span>
-                <span>{running ? "Pause" : "Start"}</span>
-              </button>
-              <button
-                type="button"
-                className="bubbly-button inline-flex min-w-36 items-center justify-center gap-xs rounded-full border-2 border-surface-variant bg-white px-lg py-md font-bold text-on-surface-variant"
-                onClick={resetTimer}
-              >
-                <span className="material-symbols-outlined">restart_alt</span>
-                <span>Reset</span>
-              </button>
+              </div>
             </div>
-          </div>
+          ) : null}
+
+          {focusStage === "lock" ? (
+            <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-2xl flex-col items-center justify-center px-lg py-xl text-center">
+              <p className="font-label-md text-label-md uppercase tracking-widest text-primary">One last reset</p>
+              <h2 className="mt-xs font-display-md text-display-md text-primary">Lock in now</h2>
+              <p className="mt-sm max-w-xl font-body-lg text-body-lg text-on-surface-variant">
+                Close extra tabs, put your phone out of reach, and keep only the task you need for this block.
+              </p>
+              <div className="mt-lg grid w-full grid-cols-1 gap-sm sm:grid-cols-3">
+                {["One task", "No switching", "Stop when time ends"].map((item) => (
+                  <div key={item} className="rounded-lg border-2 border-primary-fixed-dim bg-white/80 p-sm font-label-md text-label-md">
+                    {item}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-lg flex flex-wrap justify-center gap-sm">
+                <button
+                  type="button"
+                  className="rounded-full border-2 border-surface-variant bg-white px-lg py-sm font-label-md text-label-md text-on-surface-variant"
+                  onClick={() => setFocusStage("brief")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="bubbly-button rounded-full bg-primary px-xl py-md font-bold text-on-primary shadow-lg"
+                  onClick={startFocusTimer}
+                >
+                  Lock in
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {focusStage === "focus" ? (
+            <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-3xl flex-col items-center justify-center px-lg py-xl text-center">
+              <p className="font-label-md text-label-md uppercase tracking-widest text-primary">Focus block</p>
+              <p className="mt-md font-display-lg text-[clamp(5rem,16vw,11rem)] leading-none text-primary">
+                {minutesToClock(secondsLeft)}
+              </p>
+              <h2 className="mt-sm max-w-2xl text-balance font-headline-lg text-headline-lg text-on-surface">
+                {activeBlock?.name || "Focus time"}
+              </h2>
+              {activeBlock?.tasks?.[0] ? (
+                <p className="mt-sm max-w-2xl font-body-lg text-body-lg text-on-surface-variant">{activeBlock.tasks[0]}</p>
+              ) : null}
+              <div className="mt-lg h-2 w-full max-w-xl overflow-hidden rounded-full bg-surface-variant">
+                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(100, progressRatio * 100)}%` }} />
+              </div>
+              <div className="mt-lg flex flex-wrap justify-center gap-sm">
+                <button
+                  type="button"
+                  className="bubbly-button rounded-full bg-primary px-xl py-md font-bold text-on-primary shadow-lg"
+                  onClick={toggleTimer}
+                >
+                  {running ? "Pause" : "Resume"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border-2 border-surface-variant bg-white px-lg py-sm font-label-md text-label-md text-on-surface-variant"
+                  onClick={resetTimer}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {focusStage === "break" ? (
+            <div className="relative z-10 mx-auto grid h-[100dvh] w-full max-w-6xl grid-cols-1 items-center gap-lg px-lg py-xl lg:grid-cols-[1fr_24rem]">
+              <section className="text-center lg:text-left">
+                <p className="font-label-md text-label-md uppercase tracking-widest text-primary">
+                  {isLastBlock ? "Session complete" : "Break time"}
+                </p>
+                <h2 className="mt-xs font-display-md text-display-md text-primary">
+                  {isLastBlock ? "Nice work. Close the loop." : minutesToClock(breakSecondsLeft)}
+                </h2>
+                <p className="mt-sm max-w-2xl font-body-lg text-body-lg text-on-surface-variant">
+                  {isLastBlock
+                    ? plan.nextAction || "Write down what you finished and what comes next."
+                    : "Let your brain cool down. Pick one quiet reset, then come back for the next block."}
+                </p>
+
+                {!isLastBlock ? (
+                  <div className="mt-lg rounded-lg border-2 border-primary-fixed-dim bg-white/85 p-md">
+                    <div className="flex flex-wrap gap-xs">
+                      {[
+                        ["breathe", "Breathe"],
+                        ["memory", "Memory tap"],
+                        ["activities", "Ideas"],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={`rounded-full px-sm py-xs font-label-md text-label-md ${
+                            breakMode === value ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
+                          }`}
+                          onClick={() => setBreakMode(value as BreakMode)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {breakMode === "breathe" ? (
+                      <div className="mt-md flex flex-col items-center gap-sm">
+                        <div className="h-28 w-28 animate-pulse rounded-full border-8 border-primary-fixed-dim bg-primary-container" />
+                        <p className="font-body-md text-body-md text-on-surface-variant">Inhale slowly. Exhale slower.</p>
+                      </div>
+                    ) : null}
+
+                    {breakMode === "memory" ? (
+                      <div className="mt-md">
+                        <p className="font-body-md text-body-md text-on-surface-variant">
+                          Tap this pattern: {memoryPattern.map((item) => memoryPadLabels[item]).join(" - ")}
+                        </p>
+                        <div className="mt-sm grid grid-cols-4 gap-sm">
+                          {memoryPadLabels.map((label, index) => (
+                            <button
+                              key={label}
+                              type="button"
+                              className="rounded-lg border-2 border-primary-fixed-dim bg-primary-container py-md font-bold text-primary active:scale-95"
+                              onClick={() => handleMemoryTap(index)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-sm font-label-md text-label-md text-on-surface-variant">
+                          Round {memoryRound} - {memoryInput.length}/{memoryPattern.length}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {breakMode === "activities" ? (
+                      <ul className="mt-md space-y-xs">
+                        {breakActivities.map((activity) => (
+                          <li key={activity} className="flex gap-xs font-body-md text-body-md text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[18px] text-primary">spa</span>
+                            <span>{activity}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+
+              <aside className="rounded-lg border-2 border-surface-variant bg-white/85 p-md">
+                <p className="font-label-md text-label-md uppercase text-primary">{isLastBlock ? "After this" : "Next up"}</p>
+                <h3 className="mt-xs font-headline-md text-headline-md text-on-surface">
+                  {isLastBlock ? "Save the win" : plan.blocks[safeActiveBlockIndex + 1]?.name || "Next block"}
+                </h3>
+                <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
+                  {isLastBlock
+                    ? "Mark anything finished, then decide the next smallest task."
+                    : plan.blocks[safeActiveBlockIndex + 1]?.tasks?.[0] || "Review the next task and keep it small."}
+                </p>
+                <button
+                  type="button"
+                  className="mt-md bubbly-button w-full rounded-full bg-primary py-sm font-bold text-on-primary shadow-lg"
+                  onClick={() => void continueAfterBreak()}
+                >
+                  {isLastBlock ? "Exit session" : breakSecondsLeft > 0 ? "Skip break" : "I am ready"}
+                </button>
+              </aside>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -766,22 +1038,22 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     <button
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg"
-                      onClick={toggleTimer}
+                      onClick={openFocusPreview}
                       disabled={!activeSession || actionsDisabled}
                       title={actions.disabledReason || undefined}
                     >
-                      <span className="material-symbols-outlined">{running ? "pause_circle" : "play_circle"}</span>
-                      {running ? "Pause" : "Start session"}
+                      <span className="material-symbols-outlined">play_circle</span>
+                      Start session
                     </button>
                     <button
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full border-2 border-primary-fixed-dim bg-white py-sm font-label-md text-label-md text-primary"
-                      onClick={() => setFocusFullscreen(true)}
+                      onClick={openFocusPreview}
                       disabled={!activeSession || actionsDisabled}
                       title={actions.disabledReason || undefined}
                     >
                       <span className="material-symbols-outlined">fullscreen</span>
-                      Focus timer
+                      Preview focus mode
                     </button>
                     <button
                       type="button"
