@@ -36,7 +36,7 @@ export type StudyAgentEvent =
     }
   | {
       type: "dashboard_item_hidden";
-      itemType: "assignment" | "course";
+      itemType: "assignment" | "assignment_group" | "course";
       itemId: string;
       label: string;
       view: "dashboard";
@@ -64,12 +64,16 @@ type StudyAgentInput = {
 
 const STOP_WORDS = new Set([
   "about",
+  "already",
   "assignment",
   "assignments",
   "canvas",
+  "completed",
   "course",
   "courses",
   "dashboard",
+  "done",
+  "finished",
   "for",
   "from",
   "hide",
@@ -85,6 +89,15 @@ const STOP_WORDS = new Set([
   "with",
 ]);
 
+const SPELLING_FIXES = new Map([
+  ["algorithim", "algorithm"],
+  ["algorithims", "algorithm"],
+  ["alogrithm", "algorithm"],
+  ["alogrithms", "algorithm"],
+  ["algo", "algorithm"],
+  ["algos", "algorithm"],
+]);
+
 function normalise(value: string) {
   return value
     .toLowerCase()
@@ -94,10 +107,52 @@ function normalise(value: string) {
     .trim();
 }
 
+function canonicalToken(token: string) {
+  const fixed = SPELLING_FIXES.get(token) || token;
+  if (fixed.endsWith("ies") && fixed.length > 5) return `${fixed.slice(0, -3)}y`;
+  if (fixed.endsWith("s") && fixed.length > 5 && !fixed.endsWith("ss") && !fixed.endsWith("is")) {
+    return fixed.slice(0, -1);
+  }
+  return fixed;
+}
+
 function tokens(value: string) {
   return normalise(value)
     .split(" ")
+    .map(canonicalToken)
     .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+}
+
+function boundedEditDistance(left: string, right: string, maxDistance = 2) {
+  if (left === right) return 0;
+  if (Math.abs(left.length - right.length) > maxDistance) return maxDistance + 1;
+
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row++) {
+    const current = [row];
+    let rowBest = current[0];
+    for (let column = 1; column <= right.length; column++) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      current[column] = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        previous[column - 1] + cost,
+      );
+      rowBest = Math.min(rowBest, current[column]);
+    }
+    if (rowBest > maxDistance) return maxDistance + 1;
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function tokenMatchScore(queryToken: string, candidateToken: string) {
+  if (queryToken === candidateToken) return 8;
+  if (candidateToken.includes(queryToken) || queryToken.includes(candidateToken)) return 4;
+  const distance = boundedEditDistance(queryToken, candidateToken, 2);
+  if (distance === 1) return 6;
+  if (distance === 2 && Math.min(queryToken.length, candidateToken.length) >= 6) return 3;
+  return 0;
 }
 
 function scoreCandidate(query: string, candidate: string) {
@@ -107,11 +162,13 @@ function scoreCandidate(query: string, candidate: string) {
   if (normalisedQuery.includes(normalisedCandidate)) return 120;
 
   const queryTokens = tokens(query);
-  const candidateTokens = new Set(tokens(candidate));
+  const candidateTokens = tokens(candidate);
   return queryTokens.reduce((score, token) => {
-    if (candidateTokens.has(token)) return score + 8;
-    if (normalisedCandidate.includes(token)) return score + 3;
-    return score;
+    const bestTokenScore = candidateTokens.reduce(
+      (best, candidateToken) => Math.max(best, tokenMatchScore(token, candidateToken)),
+      0,
+    );
+    return score + bestTokenScore;
   }, 0);
 }
 
@@ -135,7 +192,13 @@ function wantsStudySession(message: string) {
 }
 
 function wantsHide(message: string) {
-  return /\b(hide|remove|delete|exclude)\b/i.test(message) && /\b(dashboard|scope|sidekick|view)\b/i.test(message);
+  const hasHideVerb = /\b(hide|remove|delete|exclude|ignore)\b/i.test(message);
+  const hasScopeWord = /\b(dashboard|scope|sidekick|view|list)\b/i.test(message);
+  const hasCompletionSignal = /\b(already|done|finished|completed|complete)\b/i.test(message);
+  const hasStudyObject = /\b(assignment|assignments|assessment|assessments|task|tasks|quiz|quizzes|course|subject|class)\b/i.test(
+    message,
+  );
+  return hasHideVerb && (hasScopeWord || (hasCompletionSignal && hasStudyObject));
 }
 
 function wantsScopeReset(message: string) {
@@ -144,6 +207,10 @@ function wantsScopeReset(message: string) {
 
 function isMostUrgentRequest(message: string) {
   return /\b(most urgent|urgent|top|first|next|due soon|priority|important)\b/i.test(message);
+}
+
+function wantsAssignmentGroup(message: string) {
+  return /\b(assignments|assessments|tasks|quizzes)\b/i.test(message);
 }
 
 function topOpenAssignment(assignments: CanvasAssignmentSummary[], dashboard: DashboardSummary) {
@@ -156,6 +223,35 @@ function topOpenAssignment(assignments: CanvasAssignmentSummary[], dashboard: Da
   const merged = new Map<string, CanvasAssignmentSummary>();
   [...dashboardItems, ...assignments].forEach((assignment) => merged.set(assignment.id, assignment));
   return sortByPriority(Array.from(merged.values()).filter((assignment) => !isSubmitted(assignment)))[0] || null;
+}
+
+function assignmentBelongsToCourse(assignment: CanvasAssignmentSummary, course: CourseLike) {
+  return (
+    assignment.courseId === course.id ||
+    normalise(assignment.courseName) === normalise(course.name) ||
+    Boolean(course.courseCode && assignment.courseCode && normalise(course.courseCode) === normalise(assignment.courseCode))
+  );
+}
+
+function bestSingleAssignmentInCourse(
+  course: CourseLike,
+  assignments: CanvasAssignmentSummary[],
+  message: string,
+) {
+  const courseAssignments = assignments.filter((assignment) => assignmentBelongsToCourse(assignment, course));
+  const typedAssignments = courseAssignments.filter((assignment) => assignment.assignmentType === "assignment");
+  if (typedAssignments.length === 1) return typedAssignments[0];
+
+  const scored = courseAssignments
+    .map((assignment) => ({
+      assignment,
+      score: scoreCandidate(message, assignment.name),
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  if (!scored[0] || scored[0].score < 8) return null;
+  if (scored[1] && scored[0].score === scored[1].score && scored[0].score < 40) return null;
+  return scored[0].assignment;
 }
 
 function bestAssignmentMatch(message: string, assignments: CanvasAssignmentSummary[]) {
@@ -353,6 +449,78 @@ async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssi
   };
 }
 
+async function hideCourseAssignmentsTool(input: StudyAgentInput, course: CourseLike) {
+  if (isDemoUser(input.user) || !env.DATABASE_URL) {
+    return {
+      provider: "agent" as const,
+      model: null,
+      agentEvents: [],
+      answer: "I can hide dashboard items once the app is connected to the real database. Demo mode does not save dashboard scope.",
+    };
+  }
+
+  const db = getDb();
+  const savedCourse = await db.course.findFirst({
+    where: { id: course.id, userId: input.user.id },
+    select: { id: true, canvasCourseId: true, name: true },
+  });
+  if (!savedCourse) {
+    return {
+      provider: "agent" as const,
+      model: null,
+      agentEvents: [],
+      answer: "I found the course name, but I could not find its saved dashboard scope.",
+    };
+  }
+
+  const savedAssignments = await db.assignment.findMany({
+    where: { userId: input.user.id, courseId: savedCourse.id },
+    include: { course: { select: { canvasCourseId: true } } },
+  });
+  if (!savedAssignments.length) {
+    return {
+      provider: "agent" as const,
+      model: null,
+      agentEvents: [],
+      answer: `I found "${savedCourse.name}", but there are no saved assignments from that course to hide yet.`,
+    };
+  }
+
+  const preferences = await getDashboardPreferences(input.user.id);
+  const assignmentIds = savedAssignments.map((assignment) => assignment.id);
+  const assignmentKeys = savedAssignments
+    .map((assignment) => canvasAssignmentKey(assignment.course.canvasCourseId, assignment.canvasAssignmentId))
+    .filter((key): key is string => Boolean(key));
+
+  await saveDashboardPreferences(input.user.id, {
+    ...preferences,
+    excludedAssignmentIds: Array.from(new Set([...preferences.excludedAssignmentIds, ...assignmentIds])),
+    excludedCanvasAssignmentKeys: Array.from(
+      new Set([...preferences.excludedCanvasAssignmentKeys, ...assignmentKeys]),
+    ),
+  });
+  await auditLog({
+    userId: input.user.id,
+    action: "study_agent.course_assignments_hidden",
+    metadata: { courseId: savedCourse.id, canvasCourseId: savedCourse.canvasCourseId, count: savedAssignments.length },
+  });
+
+  return {
+    provider: "agent" as const,
+    model: null,
+    agentEvents: [
+      {
+        type: "dashboard_item_hidden" as const,
+        itemType: "assignment_group" as const,
+        itemId: savedCourse.id,
+        label: `Hidden ${savedAssignments.length} assignment${savedAssignments.length === 1 ? "" : "s"} from ${savedCourse.name}`,
+        view: "dashboard" as const,
+      },
+    ],
+    answer: `Done. I hid ${savedAssignments.length} assignment${savedAssignments.length === 1 ? "" : "s"} from "${savedCourse.name}" in your dashboard scope. The course itself stays visible, and Canvas stays read-only.`,
+  };
+}
+
 async function hideCourseTool(input: StudyAgentInput, course: CourseLike) {
   if (isDemoUser(input.user) || !env.DATABASE_URL) {
     return {
@@ -443,18 +611,24 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
   if (wantsHide(message)) {
     const wantsCourse = /\b(course|subject|class)\b/i.test(message);
     const wantsAssignment = /\b(assignment|task|quiz|assessment)\b/i.test(message);
-    const course = wantsCourse ? bestCourseMatch(message, input.courses) : null;
+    const course = bestCourseMatch(message, input.courses);
     const assignment = wantsAssignment || !course ? bestAssignmentMatch(message, input.assignments) : null;
 
-    if (course && (!assignment || wantsCourse)) return hideCourseTool(input, course);
+    if (course && wantsAssignmentGroup(message)) return hideCourseAssignmentsTool(input, course);
     if (assignment) return hideAssignmentTool(input, assignment);
+    if (course && wantsAssignment) {
+      const fallbackAssignment = bestSingleAssignmentInCourse(course, input.assignments, message);
+      if (fallbackAssignment) return hideAssignmentTool(input, fallbackAssignment);
+      return hideCourseAssignmentsTool(input, course);
+    }
+    if (course && (!assignment || wantsCourse)) return hideCourseTool(input, course);
 
     return {
       provider: "agent",
       model: null,
       agentEvents: [],
       answer:
-        "I can hide items from the dashboard, but I need a clearer name. Try: `hide Cloud Foundations from dashboard` or `hide Week 6 Quiz from dashboard`.",
+        "I can hide items from the dashboard, but I need a clearer name. Try: `hide Cloud Foundations from dashboard`, `hide Algorithms assignments from dashboard`, or `hide Week 6 Quiz from dashboard`.",
     };
   }
 
@@ -467,3 +641,11 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
 
   return null;
 }
+
+export const __studyAgentTest = {
+  bestAssignmentMatch,
+  bestCourseMatch,
+  bestSingleAssignmentInCourse,
+  wantsAssignmentGroup,
+  wantsHide,
+};
