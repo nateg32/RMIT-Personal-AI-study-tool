@@ -1,3 +1,4 @@
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { User } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { auditLog } from "@/lib/audit";
@@ -52,14 +53,58 @@ export type StudyAgentResult = {
   agentEvents: StudyAgentEvent[];
   provider: "agent";
   model: null;
+  confirmation?: StudyAgentConfirmation;
 };
 
 type StudyAgentInput = {
   user: User;
   message: string;
+  confirmationToken?: string;
   dashboard: DashboardSummary;
   assignments: CanvasAssignmentSummary[];
   courses: CourseLike[];
+};
+
+type StudyAgentAction =
+  | {
+      type: "create_study_session";
+      assignmentId?: string | null;
+      message: string;
+    }
+  | {
+      type: "hide_assignment";
+      assignmentId: string;
+      message: string;
+    }
+  | {
+      type: "hide_course_assignments";
+      courseId: string;
+      message: string;
+    }
+  | {
+      type: "hide_course";
+      courseId: string;
+      message: string;
+    }
+  | {
+      type: "reset_scope";
+      message: string;
+    };
+
+type SignedStudyAgentAction = StudyAgentAction & {
+  userId: string;
+  expiresAt: number;
+  nonce: string;
+};
+
+export type StudyAgentConfirmation = {
+  token: string;
+  title: string;
+  body: string;
+  details: string[];
+  confirmLabel: string;
+  cancelLabel: string;
+  actionType: StudyAgentAction["type"];
 };
 
 const STOP_WORDS = new Set([
@@ -97,6 +142,67 @@ const SPELLING_FIXES = new Map([
   ["algo", "algorithm"],
   ["algos", "algorithm"],
 ]);
+
+const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
+
+function base64Url(input: string | Buffer) {
+  return Buffer.from(input).toString("base64url");
+}
+
+function signingSecret() {
+  if (!env.ENCRYPTION_KEY) {
+    throw new Error("ENCRYPTION_KEY is required for Study Agent confirmations.");
+  }
+  return env.ENCRYPTION_KEY;
+}
+
+function signAction(action: StudyAgentAction, userId: string) {
+  const payload: SignedStudyAgentAction = {
+    ...action,
+    userId,
+    expiresAt: Date.now() + CONFIRMATION_TTL_MS,
+    nonce: randomUUID(),
+  };
+  const encoded = base64Url(JSON.stringify(payload));
+  const signature = createHmac("sha256", signingSecret()).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function verifyActionToken(token: string, userId: string): SignedStudyAgentAction {
+  const [encoded, signature] = token.split(".");
+  if (!encoded || !signature) throw new Error("Confirmation expired or invalid. Ask Sidekick to prepare the action again.");
+
+  const expected = createHmac("sha256", signingSecret()).update(encoded).digest("base64url");
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== signatureBuffer.length || !timingSafeEqual(expectedBuffer, signatureBuffer)) {
+    throw new Error("Confirmation expired or invalid. Ask Sidekick to prepare the action again.");
+  }
+
+  const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as SignedStudyAgentAction;
+  if (payload.userId !== userId || payload.expiresAt < Date.now()) {
+    throw new Error("Confirmation expired or invalid. Ask Sidekick to prepare the action again.");
+  }
+  return payload;
+}
+
+function confirmationResult(
+  input: StudyAgentInput,
+  action: StudyAgentAction,
+  confirmation: Omit<StudyAgentConfirmation, "token" | "actionType">,
+): StudyAgentResult {
+  return {
+    provider: "agent",
+    model: null,
+    agentEvents: [],
+    answer: "I can do that. Confirm first so I only change your dashboard or sessions when you clearly approve it.",
+    confirmation: {
+      ...confirmation,
+      actionType: action.type,
+      token: signAction(action, input.user.id),
+    },
+  };
+}
 
 function normalise(value: string) {
   return value
@@ -305,6 +411,34 @@ function capabilitiesAnswer(): StudyAgentResult {
   };
 }
 
+function createStudySessionConfirmation(
+  input: StudyAgentInput,
+  assignment: CanvasAssignmentSummary | null,
+): StudyAgentResult {
+  const durationMinutes = parseDurationMinutes(input.message);
+  return confirmationResult(
+    input,
+    {
+      type: "create_study_session",
+      assignmentId: assignment?.id || null,
+      message: input.message,
+    },
+    {
+      title: assignment ? "Create this study session?" : "Create a custom focus session?",
+      body: assignment
+        ? `I will build a ${durationMinutes}-minute plan for "${assignment.name}" using Canvas facts and your uploaded materials.`
+        : `I will turn your message into a ${durationMinutes}-minute custom focus plan.`,
+      details: [
+        assignment ? `Course: ${assignment.courseName}` : "Source: custom focus",
+        assignment?.dueAt ? `Due: ${new Date(assignment.dueAt).toLocaleString("en-AU")}` : "Due date: not set",
+        "Canvas remains read-only.",
+      ],
+      confirmLabel: "Create session",
+      cancelLabel: "Not now",
+    },
+  );
+}
+
 async function createStudySessionTool(input: StudyAgentInput, assignment: CanvasAssignmentSummary | null) {
   const durationMinutes = parseDurationMinutes(input.message);
   const isCustom = !assignment;
@@ -394,6 +528,24 @@ async function createStudySessionTool(input: StudyAgentInput, assignment: Canvas
   };
 }
 
+function hideAssignmentConfirmation(input: StudyAgentInput, assignment: CanvasAssignmentSummary): StudyAgentResult {
+  return confirmationResult(
+    input,
+    {
+      type: "hide_assignment",
+      assignmentId: assignment.id,
+      message: input.message,
+    },
+    {
+      title: "Hide this assignment?",
+      body: `I will remove "${assignment.name}" from your dashboard scope and future sync views inside Sidekick.`,
+      details: [`Course: ${assignment.courseName}`, "This does not delete or change anything in Canvas."],
+      confirmLabel: "Hide from dashboard",
+      cancelLabel: "Keep showing it",
+    },
+  );
+}
+
 async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssignmentSummary) {
   if (isDemoUser(input.user) || !env.DATABASE_URL) {
     return {
@@ -447,6 +599,27 @@ async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssi
     ],
     answer: `Done. I hid "${assignment.name}" from your dashboard scope and future Canvas syncs. You can restore it from Settings by resetting the dashboard scope.`,
   };
+}
+
+function hideCourseAssignmentsConfirmation(input: StudyAgentInput, course: CourseLike): StudyAgentResult {
+  return confirmationResult(
+    input,
+    {
+      type: "hide_course_assignments",
+      courseId: course.id,
+      message: input.message,
+    },
+    {
+      title: "Hide this course's assignments?",
+      body: `I will hide assignments from "${course.name}" in your dashboard scope, while keeping the course itself visible.`,
+      details: [
+        course.courseCode ? `Course code: ${course.courseCode}` : "Course code: not available",
+        "Canvas remains read-only.",
+      ],
+      confirmLabel: "Hide assignments",
+      cancelLabel: "Keep showing them",
+    },
+  );
 }
 
 async function hideCourseAssignmentsTool(input: StudyAgentInput, course: CourseLike) {
@@ -521,6 +694,27 @@ async function hideCourseAssignmentsTool(input: StudyAgentInput, course: CourseL
   };
 }
 
+function hideCourseConfirmation(input: StudyAgentInput, course: CourseLike): StudyAgentResult {
+  return confirmationResult(
+    input,
+    {
+      type: "hide_course",
+      courseId: course.id,
+      message: input.message,
+    },
+    {
+      title: "Hide this course?",
+      body: `I will hide "${course.name}" from your dashboard scope and future sync views inside Sidekick.`,
+      details: [
+        course.courseCode ? `Course code: ${course.courseCode}` : "Course code: not available",
+        "This does not unenrol you or change Canvas.",
+      ],
+      confirmLabel: "Hide course",
+      cancelLabel: "Keep showing it",
+    },
+  );
+}
+
 async function hideCourseTool(input: StudyAgentInput, course: CourseLike) {
   if (isDemoUser(input.user) || !env.DATABASE_URL) {
     return {
@@ -573,6 +767,23 @@ async function hideCourseTool(input: StudyAgentInput, course: CourseLike) {
   };
 }
 
+function resetScopeConfirmation(input: StudyAgentInput): StudyAgentResult {
+  return confirmationResult(
+    input,
+    {
+      type: "reset_scope",
+      message: input.message,
+    },
+    {
+      title: "Reset dashboard scope?",
+      body: "I will show all previously hidden courses and assignments again on the next refresh or Canvas sync.",
+      details: ["No Canvas data is changed.", "You can hide items again later."],
+      confirmLabel: "Reset scope",
+      cancelLabel: "Keep current scope",
+    },
+  );
+}
+
 async function resetScopeTool(input: StudyAgentInput) {
   if (isDemoUser(input.user) || !env.DATABASE_URL) {
     return {
@@ -599,13 +810,70 @@ async function resetScopeTool(input: StudyAgentInput) {
   };
 }
 
+async function executeConfirmedAction(input: StudyAgentInput, token: string) {
+  const action = verifyActionToken(token, input.user.id);
+  const confirmedInput = { ...input, message: action.message };
+
+  if (action.type === "create_study_session") {
+    const assignment = action.assignmentId
+      ? input.assignments.find((item) => item.id === action.assignmentId) || null
+      : null;
+    return createStudySessionTool(confirmedInput, assignment);
+  }
+
+  if (action.type === "hide_assignment") {
+    const assignment = input.assignments.find((item) => item.id === action.assignmentId);
+    if (!assignment) {
+      return {
+        provider: "agent" as const,
+        model: null,
+        agentEvents: [],
+        answer: "I could not find that assignment anymore. Refresh the dashboard, then ask me again.",
+      };
+    }
+    return hideAssignmentTool(confirmedInput, assignment);
+  }
+
+  if (action.type === "hide_course_assignments") {
+    const course = input.courses.find((item) => item.id === action.courseId);
+    if (!course) {
+      return {
+        provider: "agent" as const,
+        model: null,
+        agentEvents: [],
+        answer: "I could not find that course anymore. Refresh the dashboard, then ask me again.",
+      };
+    }
+    return hideCourseAssignmentsTool(confirmedInput, course);
+  }
+
+  if (action.type === "hide_course") {
+    const course = input.courses.find((item) => item.id === action.courseId);
+    if (!course) {
+      return {
+        provider: "agent" as const,
+        model: null,
+        agentEvents: [],
+        answer: "I could not find that course anymore. Refresh the dashboard, then ask me again.",
+      };
+    }
+    return hideCourseTool(confirmedInput, course);
+  }
+
+  return resetScopeTool(confirmedInput);
+}
+
 export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentResult | null> {
   const message = input.message.trim();
+
+  if (input.confirmationToken) {
+    return executeConfirmedAction(input, input.confirmationToken);
+  }
 
   if (wantsCapabilityList(message)) return capabilitiesAnswer();
 
   if (wantsScopeReset(message)) {
-    return resetScopeTool(input);
+    return resetScopeConfirmation(input);
   }
 
   if (wantsHide(message)) {
@@ -614,14 +882,14 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
     const course = bestCourseMatch(message, input.courses);
     const assignment = wantsAssignment || !course ? bestAssignmentMatch(message, input.assignments) : null;
 
-    if (course && wantsAssignmentGroup(message)) return hideCourseAssignmentsTool(input, course);
-    if (assignment) return hideAssignmentTool(input, assignment);
+    if (course && wantsAssignmentGroup(message)) return hideCourseAssignmentsConfirmation(input, course);
+    if (assignment) return hideAssignmentConfirmation(input, assignment);
     if (course && wantsAssignment) {
       const fallbackAssignment = bestSingleAssignmentInCourse(course, input.assignments, message);
-      if (fallbackAssignment) return hideAssignmentTool(input, fallbackAssignment);
-      return hideCourseAssignmentsTool(input, course);
+      if (fallbackAssignment) return hideAssignmentConfirmation(input, fallbackAssignment);
+      return hideCourseAssignmentsConfirmation(input, course);
     }
-    if (course && (!assignment || wantsCourse)) return hideCourseTool(input, course);
+    if (course && (!assignment || wantsCourse)) return hideCourseConfirmation(input, course);
 
     return {
       provider: "agent",
@@ -636,7 +904,7 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
     const assignment = isMostUrgentRequest(message)
       ? topOpenAssignment(input.assignments, input.dashboard)
       : bestAssignmentMatch(message, input.assignments);
-    return createStudySessionTool(input, assignment);
+    return createStudySessionConfirmation(input, assignment);
   }
 
   return null;

@@ -168,6 +168,21 @@ export type StudySessionUpdateInput = {
   generatedPlanJson?: StudyPlan;
 };
 
+export type StudyAgentConfirmation = {
+  token: string;
+  title: string;
+  body: string;
+  details: string[];
+  confirmLabel: string;
+  cancelLabel: string;
+  actionType:
+    | "create_study_session"
+    | "hide_assignment"
+    | "hide_course_assignments"
+    | "hide_course"
+    | "reset_scope";
+};
+
 export type DailyBrief = {
   id?: string;
   summary: string;

@@ -23,6 +23,7 @@ import type {
   DashboardScopeSummary,
   DashboardSummary,
   FileSummary,
+  StudyAgentConfirmation,
   StudyPlan,
   StudySessionRecord,
   StudySessionUpdateInput,
@@ -118,6 +119,23 @@ const emptyScope: DashboardScopeSummary = {
 const CHAT_STORAGE_KEY = "study-sidekick-chat-v1";
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+type ChatAgentEvent = {
+  type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
+  label: string;
+  assignmentId?: string | null;
+  view?: ViewType;
+};
+
+type ChatApiResponse = {
+  answer: string;
+  lastSyncAt?: string | null;
+  provider?: "gemini" | "fallback" | "agent";
+  model?: string | null;
+  reason?: string | null;
+  confirmation?: StudyAgentConfirmation;
+  agentEvents?: ChatAgentEvent[];
+};
+
 function welcomeMessage(): ChatMessage {
   return {
     id: "welcome",
@@ -132,6 +150,15 @@ function pruneChatMessages(messages: ChatMessage[]) {
   const cutoff = Date.now() - CHAT_RETENTION_MS;
   const fresh = messages.filter((message) => message.createdAt >= cutoff);
   return fresh.length ? fresh : [welcomeMessage()];
+}
+
+function serialisableChatMessages(messages: ChatMessage[]) {
+  return pruneChatMessages(messages).map((message) => {
+    const cleanMessage = { ...message };
+    delete cleanMessage.confirmation;
+    delete cleanMessage.confirmationStatus;
+    return cleanMessage;
+  });
 }
 
 function loadStoredChatMessages() {
@@ -174,7 +201,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const chatSendingRef = useRef(false);
 
   useEffect(() => {
-    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(pruneChatMessages(chatMessages)));
+    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(serialisableChatMessages(chatMessages)));
   }, [chatMessages]);
 
   useEffect(() => {
@@ -509,6 +536,46 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     [refreshData],
   );
 
+  const applyChatResponse = useCallback(
+    (pendingId: string, payload: ChatApiResponse) => {
+      setChatProviderStatus(
+        payload.provider === "agent"
+          ? payload.confirmation
+            ? "Waiting for your confirmation"
+            : "Using Study Agent tools"
+          : payload.provider === "gemini"
+            ? `Using Gemini ${payload.model || ""}`.trim()
+            : payload.reason
+              ? `Using grounded fallback: ${payload.reason}`
+              : "Using grounded fallback",
+      );
+      setChatMessages((current) =>
+        current.map((item) =>
+          item.id === pendingId
+            ? {
+                ...item,
+                content: payload.answer,
+                provider: payload.provider,
+                model: payload.model,
+                confirmation: payload.confirmation,
+                confirmationStatus: payload.confirmation ? ("pending" as const) : undefined,
+              }
+            : item,
+        ),
+      );
+      if (payload.agentEvents?.length) {
+        const firstEvent = payload.agentEvents[0];
+        setActionMessage(firstEvent.label);
+        if (firstEvent.assignmentId) setSelectedAssignmentId(firstEvent.assignmentId);
+        if (firstEvent.view === "sessions") setActiveView("sessions");
+        void refreshData().catch((error) => {
+          setActionMessage(error instanceof Error ? error.message : "Agent action completed, but refresh failed.");
+        });
+      }
+    },
+    [refreshData],
+  );
+
   const sendChatMessage = useCallback(
     async (message: string) => {
       const trimmed = message.trim();
@@ -529,59 +596,18 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           id: pendingId,
           role: "assistant",
           createdAt: now,
-          content: "Give me a sec. I’m checking Canvas, uploaded materials, and the priority list.",
+          content: "Give me a sec. I'm checking Canvas, uploaded materials, and the priority list.",
         },
       ]);
       setChatDraft("");
       setActiveView("chat");
 
       try {
-        const payload = await apiJson<{
-          answer: string;
-          lastSyncAt?: string | null;
-          provider?: "gemini" | "fallback" | "agent";
-          model?: string | null;
-          reason?: string | null;
-          agentEvents?: Array<{
-            type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
-            label: string;
-            assignmentId?: string | null;
-            view?: ViewType;
-          }>;
-        }>("/api/chat", {
+        const payload = await apiJson<ChatApiResponse>("/api/chat", {
           method: "POST",
           body: JSON.stringify({ message: trimmed }),
         });
-        setChatProviderStatus(
-          payload.provider === "agent"
-            ? "Using Study Agent tools"
-            : payload.provider === "gemini"
-            ? `Using Gemini ${payload.model || ""}`.trim()
-            : payload.reason
-              ? `Using grounded fallback: ${payload.reason}`
-              : "Using grounded fallback",
-        );
-        setChatMessages((current) =>
-          current.map((item) =>
-            item.id === pendingId
-              ? {
-                  ...item,
-                  content: payload.answer,
-                  provider: payload.provider,
-                  model: payload.model,
-                }
-              : item,
-          ),
-        );
-        if (payload.agentEvents?.length) {
-          const firstEvent = payload.agentEvents[0];
-          setActionMessage(firstEvent.label);
-          if (firstEvent.assignmentId) setSelectedAssignmentId(firstEvent.assignmentId);
-          if (firstEvent.view === "sessions") setActiveView("sessions");
-          void refreshData().catch((error) => {
-            setActionMessage(error instanceof Error ? error.message : "Agent action completed, but refresh failed.");
-          });
-        }
+        applyChatResponse(pendingId, payload);
       } catch (error) {
         setChatMessages((current) =>
           current.map((item) =>
@@ -595,8 +621,75 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         setIsChatSending(false);
       }
     },
-    [refreshData],
+    [applyChatResponse],
   );
+
+  const confirmAgentAction = useCallback(
+    async (messageId: string, token: string) => {
+      if (!token) return;
+      if (chatSendingRef.current) {
+        setActionMessage("Sidekick is already working on an action. Wait for it to finish first.");
+        return;
+      }
+      chatSendingRef.current = true;
+      setIsChatSending(true);
+      const pendingId = crypto.randomUUID();
+      const now = Date.now();
+      setChatMessages((current) => [
+        ...current.map((message) =>
+          message.id === messageId ? { ...message, confirmationStatus: "confirmed" as const } : message,
+        ),
+        {
+          id: pendingId,
+          role: "assistant",
+          createdAt: now,
+          content: "Confirmed. I'm running that Study Agent action now.",
+          provider: "agent" as const,
+        },
+      ]);
+      setChatProviderStatus("Running Study Agent action");
+      setActiveView("chat");
+
+      try {
+        const payload = await apiJson<ChatApiResponse>("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({ confirmationToken: token }),
+        });
+        applyChatResponse(pendingId, payload);
+      } catch (error) {
+        setChatMessages((current) =>
+          current.map((message) =>
+            message.id === pendingId
+              ? {
+                  ...message,
+                  content: error instanceof Error ? error.message : "Could not run the confirmed action.",
+                  provider: "agent",
+                }
+              : message,
+          ),
+        );
+      } finally {
+        chatSendingRef.current = false;
+        setIsChatSending(false);
+      }
+    },
+    [applyChatResponse],
+  );
+
+  const cancelAgentAction = useCallback((messageId: string) => {
+    setChatMessages((current) =>
+      current.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              content: "No problem. I cancelled that action and did not change anything.",
+              confirmationStatus: "cancelled" as const,
+            }
+          : message,
+      ),
+    );
+    setChatProviderStatus("Action cancelled");
+  }, []);
 
   const logOut = useCallback(async () => {
     window.localStorage.removeItem(CHAT_STORAGE_KEY);
@@ -778,6 +871,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 draft={chatDraft}
                 onDraftChange={setChatDraft}
                 onSend={sendChatMessage}
+                onConfirmAction={confirmAgentAction}
+                onCancelAction={cancelAgentAction}
                 actions={actions}
                 isSending={isChatSending}
                 chatProviderStatus={chatProviderStatus}

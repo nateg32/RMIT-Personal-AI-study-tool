@@ -14,7 +14,10 @@ import { rateLimit } from "@/lib/rate-limit";
 import type { CanvasAssignmentSummary } from "@/lib/types";
 
 const chatSchema = z.object({
-  message: z.string().min(2).max(1000),
+  message: z.string().max(1000).optional(),
+  confirmationToken: z.string().max(4096).optional(),
+}).refine((value) => Boolean(value.message?.trim() || value.confirmationToken), {
+  message: "Message or confirmation token is required",
 });
 
 function uniqueAssignments(assignments: CanvasAssignmentSummary[]) {
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
     const user = await requireUser();
     const limit = rateLimit(`chat:${user.id}`, 20, 60_000);
     if (!limit.ok) return jsonError(new Error("Too many chat requests"), 429);
-    const { message } = await parseJson(request, chatSchema);
+    const { message = "", confirmationToken } = await parseJson(request, chatSchema);
     const [dashboard, assignments, courses] = await Promise.all([
       getDashboardData(user),
       getAssignmentsForUser(user),
@@ -49,6 +52,7 @@ export async function POST(request: Request) {
     const agentResult = await runStudyAgent({
       user,
       message,
+      confirmationToken,
       dashboard,
       assignments,
       courses,
