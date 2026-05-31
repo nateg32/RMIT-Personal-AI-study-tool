@@ -140,8 +140,68 @@ function looksLikeRawCanvasText(value: string | null | undefined) {
   ].some((marker) => text.includes(marker));
 }
 
+function looksGenericPlanText(value: string | null | undefined) {
+  const text = cleanPlanText(value, 260).toLowerCase();
+  return [
+    "confirm the deliverables",
+    "match work to the marking criteria",
+    "check submission requirements",
+    "open the canvas assignment page",
+    "complete the highest-impact part first",
+  ].includes(text);
+}
+
+function assignmentSourceText(assignment?: AssignmentSummary | null) {
+  return compactText(`${assignment?.name || ""} ${assignment?.description || ""}`, "");
+}
+
+function extractAwsItemsFromAssignment(assignment?: AssignmentSummary | null) {
+  const text = cleanPlanText(assignmentSourceText(assignment), 4_000);
+  return Array.from(
+    text.matchAll(
+      /\b(Lab\s*[-:]?\s*\d+|Activity)\s*[-:]?\s*([\s\S]*?)(?=\s+\b(?:Lab\s*[-:]?\s*\d+|Activity)\b|\s+\b(?:Learning Outcomes?|Course Learning Outcomes?|Deadline|Weighting|Submission|IMPORTANT)\b|$)/gi,
+    ),
+  )
+    .map((match) => {
+      const label = cleanPlanText(match[1], 28).replace(/lab/i, "Lab").replace(/activity/i, "Activity");
+      const name = cleanPlanText(match[2], 80);
+      return label && name ? `${label}: ${name}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function isAwsAssignment(assignment?: AssignmentSummary | null) {
+  const source = assignmentSourceText(assignment).toLowerCase();
+  return source.includes("aws academy") || (source.includes("aws") && source.includes("lab") && source.includes("activity"));
+}
+
+function taskSpecificAssignmentSummary(assignment?: AssignmentSummary | null) {
+  if (!isAwsAssignment(assignment)) return "";
+  const items = extractAwsItemsFromAssignment(assignment);
+  return `${assignment?.name || "This task"} is about completing ${items.length || 8} AWS Academy labs/activities outside Canvas, then confirming/submitting them in AWS Academy and keeping evidence because Canvas may still show it as unsubmitted.`;
+}
+
+function taskSpecificAssignmentDeliverables(assignment?: AssignmentSummary | null) {
+  if (!isAwsAssignment(assignment)) return [];
+  const items = extractAwsItemsFromAssignment(assignment);
+  const firstHalf = items.slice(0, Math.ceil(items.length / 2));
+  const secondHalf = items.slice(Math.ceil(items.length / 2));
+  return [
+    firstHalf.length ? `Finish: ${firstHalf.join("; ")}` : "Check AWS Academy for unfinished required labs/activities",
+    secondHalf.length ? `Finish: ${secondHalf.join("; ")}` : "Complete the remaining AWS Academy labs/activities",
+    "Submit or mark each item complete inside AWS Academy",
+    "Save screenshots or notes proving completion",
+    "Use Canvas only to confirm deadline, weighting, and instructions",
+  ];
+}
+
 function interpretedPlanSummary(plan: StudyPlan, assignment?: AssignmentSummary | null) {
   const preferred = plan.analysisSummary || plan.assignmentBrief;
+  const specificSummary = taskSpecificAssignmentSummary(assignment);
+  if (specificSummary && (!preferred || looksLikeRawCanvasText(preferred) || /this looks like a|identifying the deliverables/i.test(preferred))) {
+    return specificSummary;
+  }
   if (preferred && !looksLikeRawCanvasText(preferred)) return cleanPlanText(preferred, 260);
   if (!assignment) return "Choose an assignment, then Sidekick will turn the available context into a simple plan.";
   const type = assignmentTypeLabel(assignment).toLowerCase();
@@ -149,7 +209,14 @@ function interpretedPlanSummary(plan: StudyPlan, assignment?: AssignmentSummary 
 }
 
 function inferredDeliverables(plan: StudyPlan, assignment?: AssignmentSummary | null) {
-  const planDeliverables = (plan.deliverables || []).map((item) => cleanPlanText(item, 130)).filter(Boolean);
+  const specific = taskSpecificAssignmentDeliverables(assignment);
+  const planDeliverables = (plan.deliverables || [])
+    .map((item) => cleanPlanText(item, 130))
+    .filter((item) => item && !looksLikeRawCanvasText(item) && !looksGenericPlanText(item));
+  if (specific.length && planDeliverables.length < 3) return specific.slice(0, 5);
+  if (specific.length && planDeliverables.some((item) => /canvas assignment page|summarise the task/i.test(item))) {
+    return specific.slice(0, 5);
+  }
   if (planDeliverables.length) return planDeliverables.slice(0, 5);
   const blockTasks = plan.blocks.flatMap((block) => block.tasks || []).map((item) => cleanPlanText(item, 130)).filter(Boolean);
   if (blockTasks.length) return blockTasks.slice(0, 4);
@@ -161,10 +228,18 @@ function inferredDeliverables(plan: StudyPlan, assignment?: AssignmentSummary | 
   ];
 }
 
-function inferredSuccessCriteria(plan: StudyPlan) {
+function inferredSuccessCriteria(plan: StudyPlan, assignment?: AssignmentSummary | null) {
+  if (isAwsAssignment(assignment)) {
+    return [
+      "All required AWS Academy labs/activities show complete or submitted.",
+      "Completion evidence is saved outside Canvas.",
+      "Canvas deadline and external-platform instructions are checked.",
+      "Any blocked AWS Academy item is written down clearly.",
+    ];
+  }
   const criteria = [...(plan.successCriteria || []), ...(plan.rubricFocus || [])]
     .map((item) => cleanPlanText(item, 140))
-    .filter((item) => item && !looksLikeRawCanvasText(item));
+    .filter((item) => item && !looksLikeRawCanvasText(item) && !looksGenericPlanText(item));
   if (criteria.length) return criteria.slice(0, 4);
   return (plan.definitionOfDone || []).map((item) => cleanPlanText(item, 140)).filter(Boolean).slice(0, 4);
 }
@@ -295,7 +370,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const actionsDisabled = Boolean(actions.isBusy);
   const planSummary = interpretedPlanSummary(plan, selectedAssignment);
   const deliverables = inferredDeliverables(plan, selectedAssignment);
-  const successCriteria = inferredSuccessCriteria(plan);
+  const successCriteria = inferredSuccessCriteria(plan, selectedAssignment);
   const resourcePlan = inferredResources(plan);
   const summaryItems = plan.contextSummary?.length
     ? plan.contextSummary
