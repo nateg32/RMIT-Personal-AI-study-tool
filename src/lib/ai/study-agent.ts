@@ -27,6 +27,11 @@ type CourseLike = {
   courseCode?: string | null;
 };
 
+type RecentStudyAgentMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type StudyAgentEvent =
   | {
       type: "study_session_created";
@@ -60,6 +65,7 @@ type StudyAgentInput = {
   user: User;
   message: string;
   confirmationToken?: string;
+  recentMessages?: RecentStudyAgentMessage[];
   dashboard: DashboardSummary;
   assignments: CanvasAssignmentSummary[];
   courses: CourseLike[];
@@ -300,8 +306,8 @@ function wantsStudySession(message: string) {
 function wantsHide(message: string) {
   const hasHideVerb = /\b(hide|remove|delete|exclude|ignore)\b/i.test(message);
   const hasScopeWord = /\b(dashboard|scope|sidekick|view|list)\b/i.test(message);
-  const hasCompletionSignal = /\b(already|done|finished|completed|complete)\b/i.test(message);
-  const hasStudyObject = /\b(assignment|assignments|assessment|assessments|task|tasks|quiz|quizzes|course|subject|class)\b/i.test(
+  const hasCompletionSignal = /\b(already|done|finished|completed|complete|submitted)\b/i.test(message);
+  const hasStudyObject = /\b(assignment|assignments|assessment|assessments|task|tasks|quiz|quizzes|activity|activities|milestone|lab|labs|course|subject|class)\b/i.test(
     message,
   );
   return hasHideVerb && (hasScopeWord || (hasCompletionSignal && hasStudyObject));
@@ -317,6 +323,34 @@ function isMostUrgentRequest(message: string) {
 
 function wantsAssignmentGroup(message: string) {
   return /\b(assignments|assessments|tasks|quizzes)\b/i.test(message);
+}
+
+function hasPronounReference(message: string) {
+  return /\b(it|this|that|that one|this one|the one|same one|one due|due one|one that is due|one that's due)\b/i.test(message);
+}
+
+function hasAssignmentReference(message: string) {
+  return /\b(assignment|assessment|task|quiz|activity|activities|milestone|lab|labs|deadline|due|aws|academy|submitted|finished|completed|done)\b/i.test(
+    message,
+  );
+}
+
+function hasExplicitCourseReference(message: string) {
+  return /\b(course|subject|class)\b/i.test(message);
+}
+
+function recentContextText(input: StudyAgentInput) {
+  return (input.recentMessages || [])
+    .slice(-8)
+    .map((message) => message.content)
+    .filter((content) => content && content !== "__sidekick_working__")
+    .join("\n")
+    .slice(-4000);
+}
+
+function assignmentReferenceText(input: StudyAgentInput) {
+  const context = hasPronounReference(input.message) ? recentContextText(input) : "";
+  return [context, input.message].filter(Boolean).join("\n");
 }
 
 function topOpenAssignment(assignments: CanvasAssignmentSummary[], dashboard: DashboardSummary) {
@@ -368,11 +402,75 @@ function bestAssignmentMatch(message: string, assignments: CanvasAssignmentSumma
         scoreCandidate(message, assignment.name),
         scoreCandidate(message, `${assignment.courseName} ${assignment.name}`),
         scoreCandidate(message, `${assignment.courseCode || ""} ${assignment.name}`),
+        scoreCandidate(
+          message,
+          `${assignment.courseName} ${assignment.courseCode || ""} ${assignment.name} ${
+            assignment.description || ""
+          } ${assignment.rubricSummary || ""}`,
+        ),
       ),
     }))
     .sort((left, right) => right.score - left.score);
 
   if (!scored[0] || scored[0].score < 8) return null;
+  if (scored[1] && scored[0].score === scored[1].score && scored[0].score < 40) return null;
+  return scored[0].assignment;
+}
+
+function urgencyMatchBonus(assignment: CanvasAssignmentSummary) {
+  if (isSubmitted(assignment)) return -30;
+  let score = 0;
+  if (assignment.priorityLabel === "critical") score += 28;
+  if (assignment.priorityLabel === "high") score += 20;
+  if (assignment.dueStatus === "overdue" || assignment.dueStatus === "due_today") score += 24;
+  if (assignment.dueStatus === "due_this_week") score += 14;
+  if (assignment.dueAt) {
+    const due = new Date(assignment.dueAt).getTime();
+    if (Number.isFinite(due)) {
+      const hours = (due - Date.now()) / 36e5;
+      if (hours >= -96 && hours <= 24) score += 18;
+      else if (hours > 24 && hours <= 24 * 7) score += 10;
+    }
+  }
+  return score;
+}
+
+function bestContextualAssignment(
+  input: StudyAgentInput,
+  course: CourseLike | null,
+  options: { allowRecentContext: boolean },
+) {
+  const candidates = course
+    ? input.assignments.filter((assignment) => assignmentBelongsToCourse(assignment, course))
+    : input.assignments;
+  if (!candidates.length) return null;
+
+  const direct = bestAssignmentMatch(input.message, candidates);
+  if (direct) return direct;
+
+  const referenceText = options.allowRecentContext ? assignmentReferenceText(input) : input.message;
+  const contextual = options.allowRecentContext ? bestAssignmentMatch(referenceText, candidates) : null;
+  if (contextual) return contextual;
+
+  const scored = candidates
+    .map((assignment) => ({
+      assignment,
+      score:
+        Math.max(
+          scoreCandidate(referenceText, assignment.name),
+          scoreCandidate(referenceText, `${assignment.courseName} ${assignment.name}`),
+          scoreCandidate(referenceText, `${assignment.courseCode || ""} ${assignment.name}`),
+          scoreCandidate(
+            referenceText,
+            `${assignment.courseName} ${assignment.courseCode || ""} ${assignment.name} ${
+              assignment.description || ""
+            } ${assignment.rubricSummary || ""}`,
+          ),
+        ) + urgencyMatchBonus(assignment),
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  if (!scored[0] || scored[0].score < 14) return null;
   if (scored[1] && scored[0].score === scored[1].score && scored[0].score < 40) return null;
   return scored[0].assignment;
 }
@@ -529,6 +627,7 @@ async function createStudySessionTool(input: StudyAgentInput, assignment: Canvas
 }
 
 function hideAssignmentConfirmation(input: StudyAgentInput, assignment: CanvasAssignmentSummary): StudyAgentResult {
+  const completionSignal = /\b(already|done|finished|completed|complete|submitted)\b/i.test(input.message);
   return confirmationResult(
     input,
     {
@@ -538,8 +637,14 @@ function hideAssignmentConfirmation(input: StudyAgentInput, assignment: CanvasAs
     },
     {
       title: "Hide this assignment?",
-      body: `I will remove "${assignment.name}" from your dashboard scope and future sync views inside Sidekick.`,
-      details: [`Course: ${assignment.courseName}`, "This does not delete or change anything in Canvas."],
+      body: completionSignal
+        ? `I will treat "${assignment.name}" as done inside Sidekick by hiding it from your dashboard scope.`
+        : `I will remove "${assignment.name}" from your dashboard scope and future sync views inside Sidekick.`,
+      details: [
+        `Course: ${assignment.courseName}`,
+        "Canvas stays read-only, so this does not submit, delete, or change the real Canvas item.",
+        completionSignal ? "Useful when the work was submitted somewhere else, like AWS Academy or Ed." : null,
+      ].filter((detail): detail is string => Boolean(detail)),
       confirmLabel: "Hide from dashboard",
       cancelLabel: "Keep showing it",
     },
@@ -877,10 +982,18 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
   }
 
   if (wantsHide(message)) {
-    const wantsCourse = /\b(course|subject|class)\b/i.test(message);
-    const wantsAssignment = /\b(assignment|task|quiz|assessment)\b/i.test(message);
-    const course = bestCourseMatch(message, input.courses);
-    const assignment = wantsAssignment || !course ? bestAssignmentMatch(message, input.assignments) : null;
+    const wantsCourse = hasExplicitCourseReference(message);
+    const wantsAssignment = hasAssignmentReference(message);
+    const usesRecentReference = hasPronounReference(message);
+    const course =
+      bestCourseMatch(message, input.courses) ||
+      (usesRecentReference ? bestCourseMatch(recentContextText(input), input.courses) : null);
+    const assignment =
+      wantsAssignment || usesRecentReference || !course
+        ? bestContextualAssignment(input, course && wantsAssignment ? course : null, {
+            allowRecentContext: usesRecentReference || wantsAssignment,
+          })
+        : null;
 
     if (course && wantsAssignmentGroup(message)) return hideCourseAssignmentsConfirmation(input, course);
     if (assignment) return hideAssignmentConfirmation(input, assignment);
@@ -912,8 +1025,11 @@ export async function runStudyAgent(input: StudyAgentInput): Promise<StudyAgentR
 
 export const __studyAgentTest = {
   bestAssignmentMatch,
+  bestContextualAssignment,
   bestCourseMatch,
   bestSingleAssignmentInCourse,
+  hasAssignmentReference,
+  hasPronounReference,
   wantsAssignmentGroup,
   wantsHide,
 };

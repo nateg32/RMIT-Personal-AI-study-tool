@@ -440,6 +440,7 @@ export async function chatWithCanvasContext(input: {
   message: string;
   name: string;
   lastSyncAt?: string | null;
+  recentMessages?: Array<{ role: "user" | "assistant"; content: string }>;
   due: CanvasAssignmentSummary[];
   announcements: string[];
   files: string[];
@@ -494,6 +495,8 @@ Keep the answer practical and specific.
 
 Student: ${input.name}
 Question: ${input.message}
+Recent conversation, newest last:
+${input.recentMessages?.map((item) => `${item.role}: ${item.content}`).join("\n") || "none"}
 Attached media material names: ${input.mediaMaterials?.map((item) => item.name).join(", ") || "none"}
 Facts:
 ${facts}

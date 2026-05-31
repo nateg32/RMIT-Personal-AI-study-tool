@@ -45,6 +45,20 @@ const assignments: CanvasAssignmentSummary[] = [
     name: "Assignment 3",
     assignmentType: "assignment",
   },
+  {
+    id: "aws-milestone",
+    courseId: "cloud",
+    canvasAssignmentId: 4,
+    courseName: "Cloud Foundations (2610)",
+    courseCode: "COSC2757",
+    name: "Milestone 2.2 AWS Academy Labs and Activities",
+    description: "Complete six AWS Academy labs and two activities in AWS Academy.",
+    assignmentType: "external_tool",
+    dueAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+    dueStatus: "due_today",
+    priorityLabel: "critical",
+    workflowState: "unsubmitted",
+  },
 ];
 
 describe("study agent matching", () => {
@@ -73,5 +87,46 @@ describe("study agent matching", () => {
   it("still handles specific assignment names", () => {
     const match = __studyAgentTest.bestAssignmentMatch("hide week 6 quiz from dashboard", assignments);
     expect(match?.id).toBe("quiz-week-6");
+  });
+
+  it("prefers the due AWS activity assignment over hiding the whole Cloud Foundations course", () => {
+    expect(
+      __studyAgentTest.hasAssignmentReference(
+        "finished the cloud foundation activity for aws the one that is due, remove it from dashboard",
+      ),
+    ).toBe(true);
+    const match = __studyAgentTest.bestContextualAssignment(
+      {
+        message: "finished the cloud foundation activity for aws the one that is due, remove it from dashboard",
+        assignments,
+        courses,
+        dashboard: { priorityItems: [assignments[3]], dueToday: [assignments[3]], dueThisWeek: [], unsubmitted: [assignments[3]] },
+        recentMessages: [],
+      } as never,
+      courses[1],
+      { allowRecentContext: true },
+    );
+    expect(match?.id).toBe("aws-milestone");
+  });
+
+  it("resolves pronouns from recent chat context", () => {
+    const match = __studyAgentTest.bestContextualAssignment(
+      {
+        message: "can u remove it from my dashboard",
+        assignments,
+        courses,
+        dashboard: { priorityItems: [assignments[3]], dueToday: [assignments[3]], dueThisWeek: [], unsubmitted: [assignments[3]] },
+        recentMessages: [
+          {
+            role: "assistant",
+            content:
+              "You most likely mean Milestone 2.2 AWS Academy Labs and Activities for Cloud Foundations, since that one is due today.",
+          },
+        ],
+      } as never,
+      null,
+      { allowRecentContext: true },
+    );
+    expect(match?.id).toBe("aws-milestone");
   });
 });

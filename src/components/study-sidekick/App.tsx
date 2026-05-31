@@ -203,6 +203,18 @@ function serialisableChatMessages(messages: ChatMessage[]) {
   });
 }
 
+function recentChatContextMessages(messages: ChatMessage[]) {
+  return pruneChatMessages(messages)
+    .filter((message) => message.id !== "welcome")
+    .filter((message) => message.content !== "__sidekick_working__")
+    .filter((message) => !message.confirmation)
+    .slice(-8)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 1200),
+    }));
+}
+
 function loadStoredChatMessages() {
   if (typeof window === "undefined") return [welcomeMessage()];
   try {
@@ -812,6 +824,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       const now = Date.now();
       const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: trimmed, createdAt: now };
       const pendingId = crypto.randomUUID();
+      const recentMessages = recentChatContextMessages(chatMessages);
       setChatMessages((current) => [
         ...pruneChatMessages(current),
         userMessage,
@@ -828,7 +841,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       try {
         const payload = await apiJson<ChatApiResponse>("/api/chat", {
           method: "POST",
-          body: JSON.stringify({ message: trimmed }),
+          body: JSON.stringify({ message: trimmed, recentMessages }),
         });
         applyChatResponse(pendingId, payload);
       } catch (error) {
@@ -844,7 +857,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         setIsChatSending(false);
       }
     },
-    [applyChatResponse],
+    [applyChatResponse, chatMessages],
   );
 
   const confirmAgentAction = useCallback(
