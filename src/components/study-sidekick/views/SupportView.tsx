@@ -37,10 +37,15 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [ticketId, setTicketId] = useState<string | null>(null);
+  const [lastSubmittedAt, setLastSubmittedAt] = useState<number | null>(null);
 
   const submitTicket = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSubmitting) return;
+    if (lastSubmittedAt && Date.now() - lastSubmittedAt < 10_000) {
+      setMessage("Give it a few seconds before sending another ticket. This keeps the support desk clean.");
+      return;
+    }
 
     setIsSubmitting(true);
     setMessage(null);
@@ -64,6 +69,7 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
       if (!response.ok) throw new Error(payload.error || "Could not submit support ticket.");
 
       setTicketId(payload.ticketId || null);
+      setLastSubmittedAt(Date.now());
       setMessage("Ticket sent to support@creatorbot.app.");
       setSubject("");
       setDescription("");
@@ -192,6 +198,9 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
                 The ticket includes your signed-in profile, this page URL, and browser info. It never includes Canvas
                 tokens, Gemini keys, or uploaded file contents.
               </p>
+              <p className="mt-xs font-label-md text-label-md text-on-surface-variant">
+                Spam protection is active: duplicate tickets, repeated text, and rapid-fire submissions are blocked.
+              </p>
             </div>
 
             <button
@@ -239,6 +248,17 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
               <p className="font-body-md text-on-surface-variant">
                 Keep passwords and access tokens out of the ticket. If a token may have leaked, rotate it in Canvas and
                 reconnect from Settings.
+              </p>
+            </div>
+
+            <div className="straight-panel bg-surface-container-lowest border-2 border-surface-variant rounded-lg p-md">
+              <div className="flex items-center gap-sm mb-sm">
+                <span className="material-symbols-outlined text-primary">shield</span>
+                <h3 className="font-headline-md text-headline-md text-primary">Anti-spam</h3>
+              </div>
+              <p className="font-body-md text-on-surface-variant">
+                The support desk accepts a few clean reports per hour and blocks exact duplicates. If you need to add
+                more detail, update the description instead of sending the same ticket again.
               </p>
             </div>
 
