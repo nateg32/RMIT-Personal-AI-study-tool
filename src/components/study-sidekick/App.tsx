@@ -199,6 +199,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadStoredChatMessages);
   const chatSendingRef = useRef(false);
+  const autoSyncStartedRef = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(serialisableChatMessages(chatMessages)));
@@ -313,6 +314,24 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       setIsSyncing(false);
     }
   }, [refreshData]);
+
+  useEffect(() => {
+    if (loading || isSyncing || autoSyncStartedRef.current) return;
+    if (!dashboard.canvasConfigured || dashboard.syncStatus === "syncing") return;
+    if (!dashboard.stale && dashboard.lastSuccessfulSyncAt) return;
+
+    autoSyncStartedRef.current = true;
+    setActionMessage("Auto-syncing Canvas because your dashboard needs fresh data...");
+    void syncCanvas();
+  }, [
+    dashboard.canvasConfigured,
+    dashboard.lastSuccessfulSyncAt,
+    dashboard.stale,
+    dashboard.syncStatus,
+    isSyncing,
+    loading,
+    syncCanvas,
+  ]);
 
   const generateBrief = useCallback(async () => {
     setIsGeneratingBrief(true);
