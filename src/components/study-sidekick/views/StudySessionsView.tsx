@@ -176,6 +176,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const focusProgress = Math.round(progressRatio * 1131);
   const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
   const checklistText = checklist.join("\n");
+  const actionsDisabled = Boolean(actions.isBusy);
   const summaryItems = plan.contextSummary?.length
     ? plan.contextSummary
     : [
@@ -234,6 +235,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   }, [focusFullscreen]);
 
   const generateSession = () => {
+    if (actionsDisabled) return;
     if (!selectedAssignment) {
       actions.onOpenChat("I need Canvas assignments before I can build a focused session.");
       return;
@@ -261,7 +263,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const toggleChecklist = async (item: string) => {
-    if (!activeSession) return;
+    if (!activeSession || actionsDisabled) return;
     const nextPlan: StudyPlan = {
       ...plan,
       completedTasks: {
@@ -284,7 +286,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const savePlanEdits = async () => {
-    if (!activeSession) return;
+    if (!activeSession || actionsDisabled) return;
     const nextTasks = textLines(blockDraft.tasks);
     const nextChecklist = textLines(checklistDraft);
     const nextBreak = blockDraft.breakMinutes ? clampBreakMinutes(Number(blockDraft.breakMinutes)) : undefined;
@@ -312,6 +314,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const toggleTimer = () => {
+    if (actionsDisabled) return;
     if (!running && activeSession) {
       void onUpdateSession(
         activeSession.id,
@@ -470,13 +473,15 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                   </div>
                   <button
                     type="button"
-                    className="mt-sm bubbly-button w-full rounded-full border-2 border-surface-variant bg-surface-container py-xs font-label-md text-label-md text-on-surface"
+                    className="mt-sm bubbly-button w-full rounded-full border-2 border-surface-variant bg-surface-container py-xs font-label-md text-label-md text-on-surface disabled:opacity-60"
                     onClick={() =>
                       onUpdateAssignmentStatus(
                         selectedAssignment.id,
                         isSubmitted(selectedAssignment) ? "open" : "submitted_elsewhere",
                       )
                     }
+                    disabled={actionsDisabled}
+                    title={actions.disabledReason || undefined}
                   >
                     {isSubmitted(selectedAssignment) ? "Reopen locally" : "Mark done elsewhere"}
                   </button>
@@ -547,7 +552,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 type="button"
                 className="mt-md bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg disabled:opacity-60"
                 onClick={generateSession}
-                disabled={isCreatingSession || !selectedAssignment}
+                disabled={isCreatingSession || !selectedAssignment || actionsDisabled}
+                title={actions.disabledReason || undefined}
               >
                 <span className="material-symbols-outlined">auto_awesome</span>
                 {isCreatingSession ? "Building plan..." : activeSession ? "Regenerate plan" : "Create plan"}
@@ -614,7 +620,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     type="button"
                     className="rounded-full border-2 border-primary-fixed-dim bg-white px-sm py-xs font-label-md text-label-md text-primary disabled:opacity-50"
                     onClick={() => (showPlanEditor ? setShowPlanEditor(false) : openPlanEditor())}
-                    disabled={!activeSession}
+                    disabled={!activeSession || actionsDisabled}
+                    title={actions.disabledReason || undefined}
                   >
                     {showPlanEditor ? "Close edit" : "Edit selected block"}
                   </button>
@@ -706,8 +713,10 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     </label>
                     <button
                       type="button"
-                      className="mt-sm bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-sm font-bold text-on-primary"
+                      className="mt-sm bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-sm font-bold text-on-primary disabled:opacity-60"
                       onClick={savePlanEdits}
+                      disabled={actionsDisabled}
+                      title={actions.disabledReason || undefined}
                     >
                       <span className="material-symbols-outlined">save</span>
                       Save edits
@@ -731,7 +740,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                         type="button"
                         className="flex w-full items-center gap-sm rounded-lg border-2 border-transparent bg-surface-container-lowest p-sm text-left transition-all hover:border-primary-fixed"
                         onClick={() => toggleChecklist(item)}
-                        disabled={!activeSession}
+                        disabled={!activeSession || actionsDisabled}
+                        title={actions.disabledReason || undefined}
                       >
                         <span
                           className={`flex h-6 w-6 items-center justify-center rounded-md border-2 ${
@@ -757,7 +767,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg"
                       onClick={toggleTimer}
-                      disabled={!activeSession}
+                      disabled={!activeSession || actionsDisabled}
+                      title={actions.disabledReason || undefined}
                     >
                       <span className="material-symbols-outlined">{running ? "pause_circle" : "play_circle"}</span>
                       {running ? "Pause" : "Start session"}
@@ -766,7 +777,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full border-2 border-primary-fixed-dim bg-white py-sm font-label-md text-label-md text-primary"
                       onClick={() => setFocusFullscreen(true)}
-                      disabled={!activeSession}
+                      disabled={!activeSession || actionsDisabled}
+                      title={actions.disabledReason || undefined}
                     >
                       <span className="material-symbols-outlined">fullscreen</span>
                       Focus timer

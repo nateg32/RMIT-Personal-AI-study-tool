@@ -222,7 +222,8 @@ export default function AiChatView({
                         <button
                           type="button"
                           className="px-md py-sm rounded-full bg-primary text-on-primary font-label-md text-label-md bubbly-button disabled:opacity-50"
-                          disabled={isSending || message.confirmationStatus !== "pending"}
+                          disabled={isSending || actions.isBusy || message.confirmationStatus !== "pending"}
+                          title={actions.disabledReason || undefined}
                           onClick={() => onConfirmAction(message.id, message.confirmation?.token || "")}
                         >
                           {message.confirmationStatus === "confirmed" ? "Confirmed" : message.confirmation.confirmLabel}
@@ -230,7 +231,8 @@ export default function AiChatView({
                         <button
                           type="button"
                           className="px-md py-sm rounded-full border-2 border-surface-variant bg-surface-container-low text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-high transition-colors disabled:opacity-50"
-                          disabled={isSending || message.confirmationStatus !== "pending"}
+                          disabled={isSending || actions.isBusy || message.confirmationStatus !== "pending"}
+                          title={actions.disabledReason || undefined}
                           onClick={() => onCancelAction(message.id)}
                         >
                           {message.confirmationStatus === "cancelled" ? "Cancelled" : message.confirmation.cancelLabel}

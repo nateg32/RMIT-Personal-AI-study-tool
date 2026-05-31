@@ -31,6 +31,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
   const [uploadNotes, setUploadNotes] = useState("");
   const [uploadCourseId, setUploadCourseId] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const actionsDisabled = Boolean(actions.isBusy);
   const visibleFiles = useMemo(() => {
     const query = search.trim().toLowerCase();
     return files.filter((file) =>
@@ -50,7 +51,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
   }, [visibleFiles]);
 
   const uploadMaterial = async () => {
-    if (!actions.onUploadMaterial || isUploading) return;
+    if (!actions.onUploadMaterial || isUploading || actionsDisabled) return;
     setIsUploading(true);
     try {
       await actions.onUploadMaterial({
@@ -114,8 +115,10 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
           </button>
           <button
             type="button"
-            className="px-lg py-sm bg-surface-container text-on-surface-variant rounded-full font-label-md text-label-md bubbly-button border-2 border-outline-variant hover:border-primary transition-colors"
+            className="px-lg py-sm bg-surface-container text-on-surface-variant rounded-full font-label-md text-label-md bubbly-button border-2 border-outline-variant hover:border-primary transition-colors disabled:opacity-60"
             onClick={actions.onSyncCanvas}
+            disabled={actionsDisabled}
+            title={actions.disabledReason || undefined}
           >
             Refresh files
           </button>
@@ -175,7 +178,8 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
             type="button"
             className="mt-md bg-primary text-on-primary px-lg py-sm rounded-full font-label-md text-label-md bubbly-button disabled:opacity-60"
             onClick={uploadMaterial}
-            disabled={isUploading || !actions.onUploadMaterial || (!uploadFile && !uploadNotes.trim())}
+            disabled={isUploading || actionsDisabled || !actions.onUploadMaterial || (!uploadFile && !uploadNotes.trim())}
+            title={actions.disabledReason || undefined}
           >
             {isUploading ? "Indexing..." : "Save to AI materials"}
           </button>

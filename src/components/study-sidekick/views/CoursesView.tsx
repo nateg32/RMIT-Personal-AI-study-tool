@@ -13,6 +13,7 @@ type CoursesViewProps = {
   onCourseFiles: () => void;
   onCourseTasks: () => void;
   onHideCourse: (courseId: string) => void;
+  hiddenCourseIds?: string[];
 };
 
 export default function CoursesView({
@@ -23,8 +24,11 @@ export default function CoursesView({
   onCourseFiles,
   onCourseTasks,
   onHideCourse,
+  hiddenCourseIds = [],
 }: CoursesViewProps) {
   const [search, setSearch] = useState("");
+  const hiddenCourseSet = useMemo(() => new Set(hiddenCourseIds), [hiddenCourseIds]);
+  const actionsDisabled = Boolean(actions.isBusy);
   const visibleCourses = useMemo(() => {
     const query = search.trim().toLowerCase();
     return courses.filter((course) =>
@@ -56,8 +60,10 @@ export default function CoursesView({
         <div className="flex flex-wrap gap-sm lg:justify-end">
           <button
             type="button"
-            className="flex items-center gap-sm bg-surface-container border-2 border-outline-variant px-lg py-md rounded-full font-label-md text-label-md hover:bg-surface-variant transition-all active:scale-95"
+            className="flex items-center gap-sm bg-surface-container border-2 border-outline-variant px-lg py-md rounded-full font-label-md text-label-md hover:bg-surface-variant transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={actions.onSyncCanvas}
+            disabled={actionsDisabled}
+            title={actions.disabledReason || undefined}
           >
             <span className="material-symbols-outlined">sync</span> Sync Canvas
           </button>
@@ -73,6 +79,7 @@ export default function CoursesView({
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter max-w-7xl mx-auto w-full">
         {visibleCourses.map((course, index) => {
+          const isHidden = hiddenCourseSet.has(course.id);
           const courseAssignments = assignments.filter((assignment) => assignment.courseName === course.name);
           const courseFiles = files.filter((file) => file.courseName === course.name);
           const unsubmitted = courseAssignments.filter((assignment) => !isSubmitted(assignment));
@@ -155,12 +162,19 @@ export default function CoursesView({
                   </button>
                   <button
                     type="button"
-                    className="w-11 flex items-center justify-center bg-white/70 border-2 border-current/20 py-sm rounded-full font-label-md text-label-md hover:bg-white transition-all"
-                    onClick={() => onHideCourse(course.id)}
-                    aria-label="Remove course from dashboard"
-                    title="Remove from dashboard and future syncs"
+                    className="w-11 flex items-center justify-center bg-white/70 border-2 border-current/20 py-sm rounded-full font-label-md text-label-md hover:bg-white transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => {
+                      if (!isHidden) onHideCourse(course.id);
+                    }}
+                    disabled={actionsDisabled || isHidden}
+                    aria-label={isHidden ? "Course already removed from dashboard" : "Remove course from dashboard"}
+                    title={
+                      isHidden
+                        ? "Already removed from dashboard and future syncs"
+                        : actions.disabledReason || "Remove from dashboard and future syncs"
+                    }
                   >
-                    <span className="material-symbols-outlined text-sm">delete</span>
+                    <span className="material-symbols-outlined text-sm">{isHidden ? "check" : "delete"}</span>
                   </button>
                 </div>
               </div>

@@ -250,6 +250,23 @@ export type DashboardScopeSummary = {
   }>;
 };
 
+export type ActiveOperation = {
+  id: string;
+  type:
+    | "sync"
+    | "brief"
+    | "session"
+    | "scope"
+    | "assignment_status"
+    | "upload"
+    | "canvas_connection"
+    | "profile"
+    | "agent_action";
+  label: string;
+  startedAt: number;
+  view?: ViewType;
+};
+
 export type StudySidekickActions = {
   onNavigate: (view: ViewType) => void;
   onGenerateBrief: () => void;
@@ -268,4 +285,7 @@ export type StudySidekickActions = {
   actionMessage?: string | null;
   isGeneratingBrief?: boolean;
   isSyncing?: boolean;
+  isBusy?: boolean;
+  disabledReason?: string | null;
+  activeOperation?: ActiveOperation | null;
 };

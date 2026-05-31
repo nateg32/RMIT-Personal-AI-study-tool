@@ -73,6 +73,7 @@ export default function SettingsView({
   const [isResettingCanvas, setIsResettingCanvas] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const syncSummary = dashboard.syncSummary || emptySyncSummary;
+  const actionsDisabled = Boolean(actions.isBusy);
 
   const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -159,7 +160,8 @@ export default function SettingsView({
                 <button
                   type="submit"
                   className="w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
-                  disabled={isSavingProfile || !displayName.trim()}
+                  disabled={isSavingProfile || actionsDisabled || !displayName.trim()}
+                  title={actions.disabledReason || undefined}
                 >
                   {isSavingProfile ? "Saving..." : "Save display name"}
                 </button>
@@ -208,7 +210,8 @@ export default function SettingsView({
                 <button
                   type="submit"
                   className="w-full bg-primary text-on-primary rounded-full py-sm font-bold bubbly-button disabled:opacity-60 flex items-center justify-center gap-sm"
-                  disabled={isSaving}
+                  disabled={isSaving || actionsDisabled}
+                  title={actions.disabledReason || undefined}
                 >
                   <span className="material-symbols-outlined">{isSaving ? "sync" : "lock"}</span>
                   {isSaving ? "Connecting..." : "Connect Canvas"}
@@ -271,7 +274,8 @@ export default function SettingsView({
                 type="button"
                 className="mt-md w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
                 onClick={actions.onSyncCanvas}
-                disabled={actions.isSyncing}
+                disabled={actionsDisabled}
+                title={actions.disabledReason || undefined}
               >
                 {actions.isSyncing ? "Syncing..." : "Sync now"}
               </button>
@@ -279,7 +283,8 @@ export default function SettingsView({
                 type="button"
                 className="mt-sm w-full bg-error-container/70 border-2 border-error/30 text-error rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
                 onClick={resetCanvas}
-                disabled={isResettingCanvas || actions.isSyncing}
+                disabled={isResettingCanvas || actionsDisabled}
+                title={actions.disabledReason || undefined}
               >
                 {isResettingCanvas ? "Restarting..." : "Restart Canvas connection"}
               </button>
@@ -341,7 +346,8 @@ export default function SettingsView({
                 type="button"
                 className="w-full bg-white/80 border-2 border-primary-fixed-dim rounded-full py-sm font-label-md text-label-md bubbly-button disabled:opacity-60"
                 onClick={onResetDashboardScope}
-                disabled={!scope.hiddenCourses.length && !scope.hiddenAssignments.length}
+                disabled={actionsDisabled || (!scope.hiddenCourses.length && !scope.hiddenAssignments.length)}
+                title={actions.disabledReason || undefined}
               >
                 Show everything again
               </button>

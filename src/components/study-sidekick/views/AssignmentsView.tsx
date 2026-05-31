@@ -14,6 +14,7 @@ type AssignmentsViewProps = {
   onUpdateAssignmentStatus: (assignmentId: string, status: "open" | "submitted_elsewhere") => Promise<void>;
   onHideAssignment: (assignmentId: string) => void;
   isCreatingSession: boolean;
+  hiddenAssignmentIds?: string[];
 };
 
 type FilterMode = "due" | "submitted" | "unsubmitted" | "all";
@@ -31,12 +32,15 @@ export default function AssignmentsView({
   onUpdateAssignmentStatus,
   onHideAssignment,
   isCreatingSession,
+  hiddenAssignmentIds = [],
 }: AssignmentsViewProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterMode>("due");
   const [courseId, setCourseId] = useState("all");
 
   const courseNameById = useMemo(() => new Map(courses.map((course) => [course.id, course.name])), [courses]);
+  const hiddenAssignmentSet = useMemo(() => new Set(hiddenAssignmentIds), [hiddenAssignmentIds]);
+  const actionsDisabled = Boolean(actions.isBusy);
   const filteredAssignments = useMemo(() => {
     const query = search.trim().toLowerCase();
     return assignments
@@ -116,7 +120,8 @@ export default function AssignmentsView({
             type="button"
             className="bg-primary-container text-on-primary-container px-lg py-sm rounded-full font-label-md text-label-md flex items-center gap-sm bubbly-button border-2 border-primary-fixed-dim disabled:opacity-60"
             onClick={() => filteredAssignments[0] && onCreateSession(filteredAssignments[0].id)}
-            disabled={!filteredAssignments.length || isCreatingSession}
+            disabled={!filteredAssignments.length || isCreatingSession || actionsDisabled}
+            title={actions.disabledReason || undefined}
           >
             <span className="material-symbols-outlined">add</span>
             Create Study Session
@@ -127,6 +132,8 @@ export default function AssignmentsView({
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-gutter max-w-7xl mx-auto w-full">
         {filteredAssignments.map((assignment, index) => {
           const risk = riskForAssignment(assignment);
+          const isHidden = hiddenAssignmentSet.has(assignment.id);
+          const mutationDisabled = isCreatingSession || actionsDisabled;
           const palette =
             index % 3 === 0
               ? "bg-tertiary-container border-tertiary-fixed-dim text-on-tertiary-container"
@@ -191,9 +198,10 @@ export default function AssignmentsView({
                 <div className="flex gap-sm">
                   <button
                     type="button"
-                    className="flex-1 bg-white/80 text-on-surface py-xs rounded-lg font-label-md text-label-md bubbly-button"
+                    className="flex-1 bg-white/80 text-on-surface py-xs rounded-lg font-label-md text-label-md bubbly-button disabled:opacity-60"
                     onClick={() => onCreateSession(assignment.id)}
-                    disabled={isCreatingSession}
+                    disabled={mutationDisabled || isHidden}
+                    title={actions.disabledReason || (isHidden ? "Already removed from dashboard scope" : undefined)}
                   >
                     Create Study Session
                   </button>
@@ -207,14 +215,16 @@ export default function AssignmentsView({
                   </button>
                   <button
                     type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
+                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() =>
                       onUpdateAssignmentStatus(
                         assignment.id,
                         isSubmitted(assignment) ? "open" : "submitted_elsewhere",
                       )
                     }
+                    disabled={actionsDisabled || isHidden}
                     aria-label={isSubmitted(assignment) ? "Reopen assignment locally" : "Mark done elsewhere"}
+                    title={actions.disabledReason || (isHidden ? "Already removed from dashboard scope" : undefined)}
                   >
                     <span className="material-symbols-outlined">
                       {isSubmitted(assignment) ? "undo" : "task_alt"}
@@ -222,16 +232,23 @@ export default function AssignmentsView({
                   </button>
                   <button
                     type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
-                    onClick={() => onHideAssignment(assignment.id)}
-                    aria-label="Remove from dashboard"
-                    title="Remove from dashboard and future syncs"
+                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => {
+                      if (!isHidden) onHideAssignment(assignment.id);
+                    }}
+                    disabled={actionsDisabled || isHidden}
+                    aria-label={isHidden ? "Already removed from dashboard" : "Remove from dashboard"}
+                    title={
+                      isHidden
+                        ? "Already removed from dashboard and future syncs"
+                        : actions.disabledReason || "Remove from dashboard and future syncs"
+                    }
                   >
-                    <span className="material-symbols-outlined">delete</span>
+                    <span className="material-symbols-outlined">{isHidden ? "check" : "delete"}</span>
                   </button>
                   <button
                     type="button"
-                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all"
+                    className="px-sm bg-white/40 rounded-lg hover:bg-white/60 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => openCanvas(assignment.htmlUrl)}
                     aria-label="Open in Canvas"
                   >

@@ -99,6 +99,7 @@ export default function RiskView({
   );
 
   const topDriver = topRisks[0];
+  const actionsDisabled = Boolean(actions.isBusy);
 
   return (
     <div className="min-h-screen px-margin-desktop pb-lg">
@@ -117,9 +118,10 @@ export default function RiskView({
             <div className="flex flex-wrap gap-sm">
               <button
                 type="button"
-                className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-white px-lg py-sm font-label-md text-label-md text-primary"
+                className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-white px-lg py-sm font-label-md text-label-md text-primary disabled:opacity-60"
                 onClick={actions.onSyncCanvas}
-                disabled={actions.isSyncing}
+                disabled={actionsDisabled}
+                title={actions.disabledReason || undefined}
               >
                 {actions.isSyncing ? "Syncing..." : "Sync Canvas"}
               </button>
@@ -154,9 +156,10 @@ export default function RiskView({
               {topDriver ? (
                 <button
                   type="button"
-                  className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-primary-container px-md py-sm font-label-md text-label-md text-primary"
+                  className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-primary-container px-md py-sm font-label-md text-label-md text-primary disabled:opacity-60"
                   onClick={() => onCreateSession(topDriver.id)}
-                  disabled={isCreatingSession}
+                  disabled={isCreatingSession || actionsDisabled}
+                  title={actions.disabledReason || undefined}
                 >
                   Plan top task
                 </button>
@@ -196,9 +199,10 @@ export default function RiskView({
                         <div className="flex shrink-0 flex-wrap gap-xs">
                           <button
                             type="button"
-                            className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-white px-md py-xs font-label-md text-label-md text-primary"
+                            className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-white px-md py-xs font-label-md text-label-md text-primary disabled:opacity-60"
                             onClick={() => onCreateSession(assignment.id)}
-                            disabled={isCreatingSession}
+                            disabled={isCreatingSession || actionsDisabled}
+                            title={actions.disabledReason || undefined}
                           >
                             Plan
                           </button>
@@ -241,9 +245,10 @@ export default function RiskView({
               </p>
               <button
                 type="button"
-                className="mt-md bubbly-button w-full rounded-full bg-primary py-sm font-bold text-on-primary"
+                className="mt-md bubbly-button w-full rounded-full bg-primary py-sm font-bold text-on-primary disabled:opacity-60"
                 onClick={() => (topDriver ? onCreateSession(topDriver.id) : actions.onSyncCanvas())}
-                disabled={isCreatingSession || actions.isSyncing}
+                disabled={isCreatingSession || actionsDisabled}
+                title={actions.disabledReason || undefined}
               >
                 {topDriver ? "Create focus plan" : "Sync Canvas"}
               </button>

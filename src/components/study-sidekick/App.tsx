@@ -15,6 +15,7 @@ import AiChatView, { type ChatMessage } from "./views/AiChatView";
 import SettingsView from "./views/SettingsView";
 import SupportView from "./views/SupportView";
 import type {
+  ActiveOperation,
   AnnouncementSummary,
   AssignmentSummary,
   CourseSummary,
@@ -118,6 +119,8 @@ const emptyScope: DashboardScopeSummary = {
 
 const CHAT_STORAGE_KEY = "study-sidekick-chat-v1";
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
+const OPERATION_STORAGE_KEY = "study-sidekick-active-operation-v1";
+const OPERATION_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 
 type ChatAgentEvent = {
   type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
@@ -135,6 +138,45 @@ type ChatApiResponse = {
   confirmation?: StudyAgentConfirmation;
   agentEvents?: ChatAgentEvent[];
 };
+
+function operationId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isFreshOperation(operation: ActiveOperation | null) {
+  return Boolean(operation && Date.now() - operation.startedAt < OPERATION_LOCK_TIMEOUT_MS);
+}
+
+function readStoredOperation(): ActiveOperation | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(OPERATION_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as ActiveOperation;
+    if (!parsed?.id || !parsed.type || !parsed.label || !parsed.startedAt) return null;
+    if (!isFreshOperation(parsed)) {
+      window.localStorage.removeItem(OPERATION_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    window.localStorage.removeItem(OPERATION_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeStoredOperation(operation: ActiveOperation) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(OPERATION_STORAGE_KEY, JSON.stringify(operation));
+}
+
+function clearStoredOperation(operation: ActiveOperation) {
+  if (typeof window === "undefined") return;
+  const stored = readStoredOperation();
+  if (!stored || stored.id === operation.id) {
+    window.localStorage.removeItem(OPERATION_STORAGE_KEY);
+  }
+}
 
 function welcomeMessage(): ChatMessage {
   return {
@@ -195,10 +237,12 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isChatSending, setIsChatSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null);
   const [chatProviderStatus, setChatProviderStatus] = useState<string | null>(null);
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadStoredChatMessages);
   const chatSendingRef = useRef(false);
+  const activeOperationRef = useRef<ActiveOperation | null>(null);
   const autoSyncStartedRef = useRef(false);
 
   useEffect(() => {
@@ -210,6 +254,57 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       setChatMessages((current) => pruneChatMessages(current));
     }, 60_000);
     return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const stored = readStoredOperation();
+    activeOperationRef.current = stored;
+    setActiveOperation(stored);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== OPERATION_STORAGE_KEY) return;
+      const next = readStoredOperation();
+      activeOperationRef.current = next;
+      setActiveOperation(next);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  const beginOperation = useCallback(
+    (input: Omit<ActiveOperation, "id" | "startedAt">) => {
+      const stored = readStoredOperation();
+      const current = isFreshOperation(activeOperationRef.current) ? activeOperationRef.current : stored;
+
+      if (current) {
+        activeOperationRef.current = current;
+        setActiveOperation(current);
+        setActionMessage(`${current.label} is already running. I paused this action so updates do not overlap.`);
+        if (current.view) setActiveView(current.view);
+        return null;
+      }
+
+      const operation: ActiveOperation = {
+        ...input,
+        id: operationId(),
+        startedAt: Date.now(),
+      };
+      activeOperationRef.current = operation;
+      setActiveOperation(operation);
+      writeStoredOperation(operation);
+      return operation;
+    },
+    [],
+  );
+
+  const endOperation = useCallback((operation: ActiveOperation | null) => {
+    if (!operation) return;
+    if (!activeOperationRef.current || activeOperationRef.current.id === operation.id) {
+      activeOperationRef.current = null;
+      setActiveOperation(null);
+    }
+    clearStoredOperation(operation);
   }, []);
 
   const refreshData = useCallback(async () => {
@@ -252,6 +347,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   }, [refreshData]);
 
   const syncCanvas = useCallback(async () => {
+    const operation = beginOperation({ type: "sync", label: "Canvas sync", view: "dashboard" });
+    if (!operation) return;
     setIsSyncing(true);
     setActionMessage("Preparing Canvas sync and checking your visible courses...");
     try {
@@ -312,11 +409,12 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       setActionMessage(error instanceof Error ? error.message : "Canvas sync failed.");
     } finally {
       setIsSyncing(false);
+      endOperation(operation);
     }
-  }, [refreshData]);
+  }, [beginOperation, endOperation, refreshData]);
 
   useEffect(() => {
-    if (loading || isSyncing || autoSyncStartedRef.current) return;
+    if (loading || isSyncing || activeOperation || autoSyncStartedRef.current) return;
     if (!dashboard.canvasConfigured || dashboard.syncStatus === "syncing") return;
     if (!dashboard.stale && dashboard.lastSuccessfulSyncAt) return;
 
@@ -328,12 +426,15 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     dashboard.lastSuccessfulSyncAt,
     dashboard.stale,
     dashboard.syncStatus,
+    activeOperation,
     isSyncing,
     loading,
     syncCanvas,
   ]);
 
   const generateBrief = useCallback(async () => {
+    const operation = beginOperation({ type: "brief", label: "Daily brief generation", view: "dashboard" });
+    if (!operation) return;
     setIsGeneratingBrief(true);
     setActionMessage("Generating your daily Canvas brief...");
     try {
@@ -351,11 +452,14 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       setActionMessage(error instanceof Error ? error.message : "Daily brief generation failed.");
     } finally {
       setIsGeneratingBrief(false);
+      endOperation(operation);
     }
-  }, [dashboard.riskLevel, refreshData]);
+  }, [beginOperation, dashboard.riskLevel, endOperation, refreshData]);
 
   const createStudySession = useCallback(
     async (input: CreateStudySessionInput) => {
+      const operation = beginOperation({ type: "session", label: "Study session planning", view: "sessions" });
+      if (!operation) return;
       setIsCreatingSession(true);
       setActionMessage("Building a Canvas-specific study session...");
       try {
@@ -375,13 +479,77 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         setActionMessage(error instanceof Error ? error.message : "Study session creation failed.");
       } finally {
         setIsCreatingSession(false);
+        endOperation(operation);
       }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
+  );
+
+  const removeAssignmentEverywhere = useCallback((assignmentId: string) => {
+    setAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
+    setDashboard((current) => ({
+      ...current,
+      dueToday: current.dueToday.filter((assignment) => assignment.id !== assignmentId),
+      dueThisWeek: current.dueThisWeek.filter((assignment) => assignment.id !== assignmentId),
+      unsubmitted: current.unsubmitted.filter((assignment) => assignment.id !== assignmentId),
+      priorityItems: current.priorityItems?.filter((assignment) => assignment.id !== assignmentId),
+    }));
+  }, []);
+
+  const removeCourseEverywhere = useCallback(
+    (courseId: string) => {
+      const courseName = courses.find((course) => course.id === courseId)?.name;
+      const matchesCourse = (assignment: AssignmentSummary) =>
+        assignment.courseId === courseId || Boolean(courseName && assignment.courseName === courseName);
+
+      setCourses((current) => current.filter((course) => course.id !== courseId));
+      setAssignments((current) => current.filter((assignment) => !matchesCourse(assignment)));
+      setFiles((current) =>
+        current.filter((file) => file.courseId !== courseId && (!courseName || file.courseName !== courseName)),
+      );
+      setAnnouncements((current) => current.filter((announcement) => !courseName || announcement.courseName !== courseName));
+      setDashboard((current) => ({
+        ...current,
+        dueToday: current.dueToday.filter((assignment) => !matchesCourse(assignment)),
+        dueThisWeek: current.dueThisWeek.filter((assignment) => !matchesCourse(assignment)),
+        unsubmitted: current.unsubmitted.filter((assignment) => !matchesCourse(assignment)),
+        priorityItems: current.priorityItems?.filter((assignment) => !matchesCourse(assignment)),
+        courseBreakdown: current.courseBreakdown?.filter(
+          (course) => course.courseId !== courseId && (!courseName || course.name !== courseName),
+        ),
+      }));
+    },
+    [courses],
   );
 
   const updateDashboardScope = useCallback(
     async (body: { action: "hide_course"; courseId: string } | { action: "hide_assignment"; assignmentId: string } | { action: "reset" }) => {
+      const hiddenAssignmentIds = new Set([
+        ...dashboardScope.excludedAssignmentIds,
+        ...dashboardScope.hiddenAssignments.map((assignment) => assignment.id),
+      ]);
+      const hiddenCourseIds = new Set([
+        ...dashboardScope.excludedCourseIds,
+        ...dashboardScope.hiddenCourses.map((course) => course.id),
+      ]);
+
+      if (body.action === "hide_assignment" && hiddenAssignmentIds.has(body.assignmentId)) {
+        removeAssignmentEverywhere(body.assignmentId);
+        setActionMessage("That assignment is already hidden from the dashboard.");
+        return;
+      }
+      if (body.action === "hide_course" && hiddenCourseIds.has(body.courseId)) {
+        removeCourseEverywhere(body.courseId);
+        setActionMessage("That course is already hidden from the dashboard.");
+        return;
+      }
+      if (body.action === "reset" && !dashboardScope.hiddenCourses.length && !dashboardScope.hiddenAssignments.length) {
+        setActionMessage("Dashboard scope is already showing everything.");
+        return;
+      }
+
+      const operation = beginOperation({ type: "scope", label: "Dashboard scope update", view: activeView });
+      if (!operation) return;
       setActionMessage("Updating what appears on your dashboard...");
       try {
         const updated = await apiJson<DashboardScopeSummary>("/api/preferences", {
@@ -389,19 +557,21 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           body: JSON.stringify(body),
         });
         setDashboardScope(updated);
+        if (body.action === "hide_assignment") removeAssignmentEverywhere(body.assignmentId);
+        if (body.action === "hide_course") removeCourseEverywhere(body.courseId);
         setActionMessage(
           body.action === "reset"
             ? "Dashboard scope reset. The next sync will include all visible Canvas courses and assignments again."
             : "Removed from your dashboard scope. Future Canvas syncs will skip it unless you reset the scope.",
         );
-        void refreshData().catch((error) => {
-          setActionMessage(error instanceof Error ? error.message : "Dashboard scope saved, but refresh failed.");
-        });
+        await refreshData();
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Could not update dashboard scope.");
+      } finally {
+        endOperation(operation);
       }
     },
-    [refreshData],
+    [activeView, beginOperation, dashboardScope, endOperation, refreshData, removeAssignmentEverywhere, removeCourseEverywhere],
   );
 
   const updateStudySession = useCallback(
@@ -417,22 +587,32 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
 
   const updateStudySessionMeta = useCallback(
     async (sessionId: string, updates: StudySessionUpdateInput) => {
+      const operation = beginOperation({ type: "session", label: "Study session save", view: "sessions" });
+      if (!operation) return;
       setActionMessage("Saving study session changes...");
-      const updated = await apiJson<StudySessionRecord>(`/api/study-sessions/${sessionId}`, {
-        method: "PATCH",
-        body: JSON.stringify(updates),
-      });
-      setStudySessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
-      setActionMessage("Study session updated.");
-      void refreshData().catch((error) => {
-        setActionMessage(error instanceof Error ? error.message : "Study session saved, but refresh failed.");
-      });
+      try {
+        const updated = await apiJson<StudySessionRecord>(`/api/study-sessions/${sessionId}`, {
+          method: "PATCH",
+          body: JSON.stringify(updates),
+        });
+        setStudySessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
+        setActionMessage("Study session updated.");
+        void refreshData().catch((error) => {
+          setActionMessage(error instanceof Error ? error.message : "Study session saved, but refresh failed.");
+        });
+      } catch (error) {
+        setActionMessage(error instanceof Error ? error.message : "Could not save study session changes.");
+      } finally {
+        endOperation(operation);
+      }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
   );
 
   const updateAssignmentStatus = useCallback(
     async (assignmentId: string, status: "open" | "submitted_elsewhere") => {
+      const operation = beginOperation({ type: "assignment_status", label: "Assignment status update", view: "assignments" });
+      if (!operation) return;
       setActionMessage(status === "submitted_elsewhere" ? "Marking assignment done locally..." : "Reopening assignment locally...");
       try {
         await apiJson<{ ok: boolean }>(`/api/assignments/${assignmentId}/status`, {
@@ -479,13 +659,17 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         });
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Could not update assignment status.");
+      } finally {
+        endOperation(operation);
       }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
   );
 
   const uploadMaterial = useCallback(
     async (input: { file?: File | null; title?: string; notes?: string; courseId?: string; assignmentId?: string }) => {
+      const operation = beginOperation({ type: "upload", label: "Study material upload", view: "files" });
+      if (!operation) return;
       setActionMessage("Indexing your study material for Files, AI chat, and study sessions...");
       const formData = new FormData();
       if (input.file) formData.append("file", input.file);
@@ -508,51 +692,71 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       } catch (error) {
         setActionMessage(error instanceof Error ? error.message : "Material upload failed.");
         throw error;
+      } finally {
+        endOperation(operation);
       }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
   );
 
   const connectCanvas = useCallback(
     async (canvasBaseUrl: string, accessToken: string) => {
+      const operation = beginOperation({ type: "canvas_connection", label: "Canvas connection update", view: "settings" });
+      if (!operation) return;
       setActionMessage("Validating and saving your Canvas token server-side...");
-      await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", {
-        method: "POST",
-        body: JSON.stringify({ canvasBaseUrl, accessToken }),
-      });
-      await refreshData();
-      setActionMessage("Canvas connected. Run Sync now when you are ready to import courses, assignments, files, and announcements.");
+      try {
+        await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", {
+          method: "POST",
+          body: JSON.stringify({ canvasBaseUrl, accessToken }),
+        });
+        await refreshData();
+        setActionMessage("Canvas connected. Run Sync now when you are ready to import courses, assignments, files, and announcements.");
+      } finally {
+        endOperation(operation);
+      }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
   );
 
   const resetCanvasConnection = useCallback(async () => {
+    const operation = beginOperation({ type: "canvas_connection", label: "Canvas connection reset", view: "settings" });
+    if (!operation) return;
     setActionMessage("Clearing the saved Canvas connection and synced Canvas data...");
-    await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", { method: "DELETE" });
-    await refreshData();
-    setAssignments([]);
-    setCourses([]);
-    setAnnouncements([]);
-    setSelectedAssignmentId(null);
-    setActionMessage(
-      "Canvas connection reset. Paste a fresh Canvas token in Settings, then run Sync now. Manual uploads and study sessions stay in the app.",
-    );
-  }, [refreshData]);
+    try {
+      await apiJson<{ ok: boolean }>("/api/onboarding/connect-canvas", { method: "DELETE" });
+      await refreshData();
+      setAssignments([]);
+      setCourses([]);
+      setAnnouncements([]);
+      setSelectedAssignmentId(null);
+      setActionMessage(
+        "Canvas connection reset. Paste a fresh Canvas token in Settings, then run Sync now. Manual uploads and study sessions stay in the app.",
+      );
+    } finally {
+      endOperation(operation);
+    }
+  }, [beginOperation, endOperation, refreshData]);
 
   const updateProfileName = useCallback(
     async (name: string) => {
+      const operation = beginOperation({ type: "profile", label: "Profile update", view: "settings" });
+      if (!operation) return;
       setActionMessage("Saving your display name...");
-      await apiJson<{ name: string }>("/api/profile", {
-        method: "PATCH",
-        body: JSON.stringify({ name }),
-      });
-      setDashboard((current) => ({ ...current, userName: name.trim().split(/\s+/)[0] || current.userName }));
-      setActionMessage("Display name saved.");
-      void refreshData().catch((error) => {
-        setActionMessage(error instanceof Error ? error.message : "Display name saved, but refresh failed.");
-      });
+      try {
+        await apiJson<{ name: string }>("/api/profile", {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+        setDashboard((current) => ({ ...current, userName: name.trim().split(/\s+/)[0] || current.userName }));
+        setActionMessage("Display name saved.");
+        void refreshData().catch((error) => {
+          setActionMessage(error instanceof Error ? error.message : "Display name saved, but refresh failed.");
+        });
+      } finally {
+        endOperation(operation);
+      }
     },
-    [refreshData],
+    [beginOperation, endOperation, refreshData],
   );
 
   const applyChatResponse = useCallback(
@@ -646,8 +850,11 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const confirmAgentAction = useCallback(
     async (messageId: string, token: string) => {
       if (!token) return;
+      const operation = beginOperation({ type: "agent_action", label: "Study Agent action", view: "chat" });
+      if (!operation) return;
       if (chatSendingRef.current) {
         setActionMessage("Sidekick is already working on an action. Wait for it to finish first.");
+        endOperation(operation);
         return;
       }
       chatSendingRef.current = true;
@@ -690,9 +897,10 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       } finally {
         chatSendingRef.current = false;
         setIsChatSending(false);
+        endOperation(operation);
       }
     },
-    [applyChatResponse],
+    [applyChatResponse, beginOperation, endOperation],
   );
 
   const cancelAgentAction = useCallback((messageId: string) => {
@@ -732,6 +940,18 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     }
   }, [assignments]);
 
+  const hiddenAssignmentIds = useMemo(
+    () => Array.from(new Set([...dashboardScope.excludedAssignmentIds, ...dashboardScope.hiddenAssignments.map((assignment) => assignment.id)])),
+    [dashboardScope.excludedAssignmentIds, dashboardScope.hiddenAssignments],
+  );
+  const hiddenCourseIds = useMemo(
+    () => Array.from(new Set([...dashboardScope.excludedCourseIds, ...dashboardScope.hiddenCourses.map((course) => course.id)])),
+    [dashboardScope.excludedCourseIds, dashboardScope.hiddenCourses],
+  );
+  const disabledReason = activeOperation
+    ? `${activeOperation.label} is running. Wait for it to finish before starting another update.`
+    : null;
+
   const actions: StudySidekickActions = useMemo(
     () => ({
       onNavigate: setActiveView,
@@ -745,8 +965,22 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       actionMessage,
       isGeneratingBrief,
       isSyncing,
+      isBusy: Boolean(activeOperation),
+      disabledReason,
+      activeOperation,
     }),
-    [actionMessage, generateBrief, isGeneratingBrief, isSyncing, openChat, startSession, syncCanvas, uploadMaterial],
+    [
+      actionMessage,
+      activeOperation,
+      disabledReason,
+      generateBrief,
+      isGeneratingBrief,
+      isSyncing,
+      openChat,
+      startSession,
+      syncCanvas,
+      uploadMaterial,
+    ],
   );
 
   const mobileItems: Array<{ view: ViewType; icon: string }> = [
@@ -828,6 +1062,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 onUpdateAssignmentStatus={updateAssignmentStatus}
                 onHideAssignment={(assignmentId) => updateDashboardScope({ action: "hide_assignment", assignmentId })}
                 isCreatingSession={isCreatingSession}
+                hiddenAssignmentIds={hiddenAssignmentIds}
               />
             )}
             {activeView === "courses" && (
@@ -839,6 +1074,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                 onCourseFiles={() => setActiveView("files")}
                 onCourseTasks={() => setActiveView("assignments")}
                 onHideCourse={(courseId) => updateDashboardScope({ action: "hide_course", courseId })}
+                hiddenCourseIds={hiddenCourseIds}
               />
             )}
             {activeView === "announcements" && (

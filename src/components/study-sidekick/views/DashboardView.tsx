@@ -26,10 +26,14 @@ function MissionCard({
   assignment,
   index,
   onCreateSession,
+  disabled,
+  disabledReason,
 }: {
   assignment: AssignmentSummary;
   index: number;
   onCreateSession: (assignmentId: string) => void;
+  disabled?: boolean;
+  disabledReason?: string | null;
 }) {
   const styles = ["sticky-note-mint", "sticky-note-peach", "sticky-note-lavender"];
   const icons = ["assignment", "history_edu", "calculate"];
@@ -38,8 +42,10 @@ function MissionCard({
       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           type="button"
-          className="p-xs bg-white/50 rounded-full hover:bg-white transition-colors"
+          className="p-xs bg-white/50 rounded-full hover:bg-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => onCreateSession(assignment.id)}
+          disabled={disabled}
+          title={disabledReason || undefined}
           aria-label={`Create study session for ${assignment.name}`}
         >
           <span className="material-symbols-outlined text-[18px]">edit</span>
@@ -68,8 +74,10 @@ function MissionCard({
         </span>
         <button
           type="button"
-          className="font-bold text-primary flex items-center gap-xs"
+          className="font-bold text-primary flex items-center gap-xs disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => onCreateSession(assignment.id)}
+          disabled={disabled}
+          title={disabledReason || undefined}
         >
           Plan it
           <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
@@ -170,6 +178,7 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
     () => buildFocusStats(sessions, dashboard.timezone),
     [dashboard.timezone, sessions],
   );
+  const actionsDisabled = Boolean(actions.isBusy);
   const briefingSummary =
     dashboard.priorityItems?.length
       ? dashboard.todayMission[0]
@@ -197,7 +206,8 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
               type="button"
               className="bg-surface-container text-on-surface-variant border-2 border-surface-variant px-md py-sm rounded-full font-bold hover-squish flex items-center gap-xs disabled:opacity-60"
               onClick={actions.onGenerateBrief}
-              disabled={actions.isGeneratingBrief}
+              disabled={actionsDisabled}
+              title={actions.disabledReason || undefined}
             >
               <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
               {actions.isGeneratingBrief ? "Generating..." : "Generate brief"}
@@ -206,7 +216,8 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
               type="button"
               className="bg-surface-container text-on-surface-variant border-2 border-surface-variant px-md py-sm rounded-full font-bold hover-squish flex items-center gap-xs disabled:opacity-60"
               onClick={actions.onSyncCanvas}
-              disabled={actions.isSyncing}
+              disabled={actionsDisabled}
+              title={actions.disabledReason || undefined}
             >
               <span className="material-symbols-outlined text-[18px]">sync</span>
               {actions.isSyncing ? "Syncing..." : "Sync now"}
@@ -364,6 +375,8 @@ export default function DashboardView({ dashboard, dailyBrief, sessions, actions
                   assignment={assignment}
                   index={index}
                   onCreateSession={onCreateSession}
+                  disabled={actionsDisabled}
+                  disabledReason={actions.disabledReason}
                 />
               ))}
             </div>
