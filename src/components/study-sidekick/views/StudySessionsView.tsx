@@ -10,7 +10,7 @@ import type {
   StudySessionUpdateInput,
   StudySidekickActions,
 } from "../types";
-import { compactText, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
+import { assignmentTypeLabel, compactText, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
 import { xpForFocusMinutes } from "../lib/streak";
 
 type StudySessionsViewProps = {
@@ -114,8 +114,80 @@ function confidenceCopy(confidence: "high" | "medium" | "low") {
   };
 }
 
+function cleanPlanText(value: string | null | undefined, max = 220) {
+  const text = compactText(value, "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max).trim()}...` : text;
+}
+
+function looksLikeRawCanvasText(value: string | null | undefined) {
+  const text = compactText(value, "").toLowerCase();
+  if (text.length > 520) return true;
+  return [
+    "course name:",
+    "course code:",
+    "assignment title:",
+    "learning outcomes",
+    "overview of the assignment",
+    "weighting:",
+    "deadline:",
+    "rubric criteria",
+    "important:",
+  ].some((marker) => text.includes(marker));
+}
+
+function interpretedPlanSummary(plan: StudyPlan, assignment?: AssignmentSummary | null) {
+  const preferred = plan.analysisSummary || plan.assignmentBrief;
+  if (preferred && !looksLikeRawCanvasText(preferred)) return cleanPlanText(preferred, 260);
+  if (!assignment) return "Choose an assignment, then Sidekick will turn the available context into a simple plan.";
+  const type = assignmentTypeLabel(assignment).toLowerCase();
+  return `This looks like a ${type} for ${assignment.courseName}. The plan focuses on understanding the task, identifying the deliverables, using the right course resources, and leaving with a clear next action.`;
+}
+
+function inferredDeliverables(plan: StudyPlan, assignment?: AssignmentSummary | null) {
+  const planDeliverables = (plan.deliverables || []).map((item) => cleanPlanText(item, 130)).filter(Boolean);
+  if (planDeliverables.length) return planDeliverables.slice(0, 5);
+  const blockTasks = plan.blocks.flatMap((block) => block.tasks || []).map((item) => cleanPlanText(item, 130)).filter(Boolean);
+  if (blockTasks.length) return blockTasks.slice(0, 4);
+  if (!assignment) return ["Choose an assignment", "Generate a plan", "Start the first focus block"];
+  return [
+    `Clarify the required output for ${assignment.name}`,
+    "Check the submission instructions",
+    "Complete the highest-impact part first",
+  ];
+}
+
+function inferredSuccessCriteria(plan: StudyPlan) {
+  const criteria = [...(plan.successCriteria || []), ...(plan.rubricFocus || [])]
+    .map((item) => cleanPlanText(item, 140))
+    .filter((item) => item && !looksLikeRawCanvasText(item));
+  if (criteria.length) return criteria.slice(0, 4);
+  return (plan.definitionOfDone || []).map((item) => cleanPlanText(item, 140)).filter(Boolean).slice(0, 4);
+}
+
+function inferredResources(plan: StudyPlan) {
+  const planned = (plan.resourcePlan || []).map((resource) => ({
+    title: cleanPlanText(resource.title, 90),
+    reason: cleanPlanText(resource.reason, 130),
+    url: resource.url,
+  }));
+  if (planned.length) return planned.slice(0, 4);
+  return (plan.resourcesToOpen || []).slice(0, 4).map((resource) => ({
+    title: cleanPlanText(resource.title, 90),
+    reason: "Open this when it supports the current work block.",
+    url: resource.url,
+  }));
+}
+
 function fallbackPlan(assignment?: AssignmentSummary | null, duration = defaultDuration): StudyPlan {
   const title = assignment ? `${assignment.name} Sprint` : "Study Session";
+  const summary = assignment
+    ? `This looks like a ${assignmentTypeLabel(assignment).toLowerCase()} for ${assignment.courseName}. Start by turning the brief into deliverables, then make progress on the highest-impact task.`
+    : "Choose an assignment, then Sidekick will create a simple focus plan.";
   return {
     title,
     durationMinutes: duration,
@@ -126,8 +198,13 @@ function fallbackPlan(assignment?: AssignmentSummary | null, duration = defaultD
       assignment?.description ? "Assignment description found." : "Assignment description is missing.",
       assignment?.rubricSummary ? "Rubric summary found." : "Rubric summary is missing.",
     ],
-    assignmentBrief: assignment?.description || "Choose an assignment, add a short brief if needed, then generate a plan.",
-    rubricFocus: assignment?.rubricSummary ? [assignment.rubricSummary] : [],
+    analysisSummary: summary,
+    assignmentBrief: summary,
+    deliverables: assignment
+      ? ["Clarify the required output", "Check submission instructions", "Complete the highest-impact part first"]
+      : ["Choose an assignment", "Generate a plan", "Start the first focus block"],
+    successCriteria: ["Requirements are clear", "Progress is saved", "Next action is written"],
+    rubricFocus: ["Requirements are clear", "Progress is saved", "Next action is written"],
     blocks: [
       {
         name: "Understand the task",
@@ -153,6 +230,9 @@ function fallbackPlan(assignment?: AssignmentSummary | null, duration = defaultD
     checklist: ["Brief understood", "Main deliverable started", "Next action written"],
     definitionOfDone: ["You know what to do next", "Progress is saved", "Submission requirements are clear"],
     resourcesToOpen: assignment?.htmlUrl ? [{ title: "Canvas assignment", url: assignment.htmlUrl }] : [],
+    resourcePlan: assignment?.htmlUrl
+      ? [{ title: "Canvas assignment", url: assignment.htmlUrl, reason: "Use this to check the official brief and submission details." }]
+      : [],
     nextAction: assignment?.htmlUrl ? "Open the Canvas brief." : "Choose an assignment.",
   };
 }
@@ -213,17 +293,17 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const sessionRewardMinutes = planFocusMinutes(plan);
   const sessionRewardXp = xpForFocusMinutes(sessionRewardMinutes);
   const actionsDisabled = Boolean(actions.isBusy);
+  const planSummary = interpretedPlanSummary(plan, selectedAssignment);
+  const deliverables = inferredDeliverables(plan, selectedAssignment);
+  const successCriteria = inferredSuccessCriteria(plan);
+  const resourcePlan = inferredResources(plan);
   const summaryItems = plan.contextSummary?.length
     ? plan.contextSummary
     : [
         selectedAssignment?.description ? "Canvas assignment description found." : "Canvas assignment description is missing.",
         selectedAssignment?.rubricSummary ? "Rubric summary found." : "Rubric summary is missing.",
       ];
-  const whatMatters = [
-    ...(plan.rubricFocus || []),
-    ...(plan.riskWarning ? [plan.riskWarning] : []),
-    plan.nextAction,
-  ].filter(Boolean).slice(0, 4);
+  const whatMatters = (successCriteria.length ? successCriteria : deliverables).slice(0, 4);
   const laterBlocks = plan.blocks.slice(safeActiveBlockIndex + 1, safeActiveBlockIndex + 4);
 
   useEffect(() => {
@@ -448,7 +528,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const askAboutSession = () => {
-    const blockTasks = activeBlock?.tasks?.length ? ` Tasks: ${activeBlock.tasks.join("; ")}` : "";
+    const blockTasks = activeBlock?.tasks?.length ? ` Tasks: ${activeBlock.tasks.map((task) => cleanPlanText(task, 120)).join("; ")}` : "";
     actions.onOpenChat(
       `Help me with this focus session: ${plan.title}. Current block: ${activeBlock?.name || "not selected"}.${blockTasks}`,
     );
@@ -480,7 +560,11 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 <section className="rounded-lg border-2 border-primary-fixed-dim bg-white/85 p-md">
                   <h3 className="font-headline-sm text-headline-sm">Get done now</h3>
                   <ul className="mt-sm space-y-xs">
-                    {(activeBlock?.tasks?.length ? activeBlock.tasks : [plan.nextAction]).slice(0, 4).map((task) => (
+                    {(activeBlock?.tasks?.length ? activeBlock.tasks : [plan.nextAction])
+                      .slice(0, 4)
+                      .map((task) => cleanPlanText(task, 130))
+                      .filter(Boolean)
+                      .map((task) => (
                       <li key={task} className="flex gap-xs font-body-md text-body-md text-on-surface-variant">
                         <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
                         <span>{task}</span>
@@ -570,7 +654,9 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 {activeBlock?.name || "Focus time"}
               </h2>
               {activeBlock?.tasks?.[0] ? (
-                <p className="mt-sm max-w-2xl font-body-lg text-body-lg text-on-surface-variant">{activeBlock.tasks[0]}</p>
+                <p className="mt-sm max-w-2xl font-body-lg text-body-lg text-on-surface-variant">
+                  {cleanPlanText(activeBlock.tasks[0], 150)}
+                </p>
               ) : null}
               <div className="mt-lg h-2 w-full max-w-xl overflow-hidden rounded-full bg-surface-variant">
                 <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(100, progressRatio * 100)}%` }} />
@@ -605,7 +691,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 </h2>
                 <p className="mt-sm max-w-2xl font-body-lg text-body-lg text-on-surface-variant">
                   {isLastBlock
-                    ? plan.nextAction || "Write down what you finished and what comes next."
+                    ? cleanPlanText(plan.nextAction, 180) || "Write down what you finished and what comes next."
                     : "Let your brain cool down. Pick one quiet reset, then come back for the next block."}
                 </p>
 
@@ -808,7 +894,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                 </div>
               </div>
               <div className="mt-md space-y-xs">
-                {summaryItems.slice(0, 4).map((item) => (
+                {summaryItems.slice(0, 4).map((item) => cleanPlanText(item, 120)).filter(Boolean).map((item) => (
                   <p key={item} className="flex gap-xs font-label-md text-label-md text-on-surface-variant">
                     <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
                     <span>{item}</span>
@@ -876,8 +962,13 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                   </p>
                   <h2 className="mt-xs font-display-md text-display-md text-primary">{plan.title}</h2>
                   <p className="mt-sm max-w-3xl font-body-lg text-body-lg text-on-surface-variant">
-                    {compactText(plan.assignmentBrief || selectedAssignment?.description, "Generate a plan to pull Canvas context into this session.")}
+                    {planSummary}
                   </p>
+                  {needsUserContext ? (
+                    <p className="mt-sm rounded-full border border-secondary-fixed-dim bg-secondary-container/30 px-sm py-xs font-label-md text-label-md text-secondary">
+                      Need more context? Upload the brief in AI Chat or paste a short note on the left, then regenerate.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-sm md:justify-end">
                   {selectedAssignment?.htmlUrl ? (
@@ -901,10 +992,15 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
               <div className="mt-lg grid grid-cols-1 gap-md lg:grid-cols-2">
                 <section className="rounded-lg border-2 border-surface-variant bg-white p-md">
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface">What this is asking</h3>
-                  <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
-                    {compactText(plan.assignmentBrief || selectedAssignment?.description, "The synced Canvas task is thin. Add a short brief to make the plan more specific.")}
-                  </p>
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface">What to produce</h3>
+                  <ul className="mt-sm space-y-xs">
+                    {deliverables.slice(0, 5).map((item) => (
+                      <li key={item} className="flex gap-xs font-body-md text-body-md text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </section>
                 <section className="rounded-lg border-2 border-surface-variant bg-white p-md">
                   <h3 className="font-headline-sm text-headline-sm text-on-surface">What matters most</h3>
@@ -918,6 +1014,27 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                   </ul>
                 </section>
               </div>
+
+              {resourcePlan.length ? (
+                <section className="mt-md rounded-lg border-2 border-surface-variant bg-white p-md">
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface">Useful resources</h3>
+                  <div className="mt-sm grid grid-cols-1 gap-sm md:grid-cols-2">
+                    {resourcePlan.map((resource) => (
+                      <button
+                        key={`${resource.title}-${resource.url || resource.reason}`}
+                        type="button"
+                        className="rounded-lg border border-surface-variant bg-surface-container-lowest p-sm text-left transition-all hover:border-primary active:scale-[0.99]"
+                        onClick={() => {
+                          if (resource.url) window.open(resource.url, "_blank", "noopener,noreferrer");
+                        }}
+                      >
+                        <p className="font-label-lg text-label-lg font-bold text-primary">{resource.title}</p>
+                        <p className="mt-xs font-body-sm text-body-sm text-on-surface-variant">{resource.reason}</p>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
 
               <div className="mt-lg">
                 <div className="flex items-center justify-between gap-sm">
@@ -949,7 +1066,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                         <div className="min-w-0 flex-1">
                           <p className="font-headline-sm text-headline-sm text-on-surface">{block.name}</p>
                           <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
-                            {block.tasks[0] || block.goal || "Focus task"}
+                            {cleanPlanText(block.tasks[0] || block.goal, 150) || "Focus task"}
                           </p>
                           {block.breakMinutes ? (
                             <p className="mt-xs font-label-md text-label-md text-secondary">

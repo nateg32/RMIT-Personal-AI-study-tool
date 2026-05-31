@@ -1123,6 +1123,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             {activeView === "chat" && (
               <AiChatView
                 messages={chatMessages}
+                courses={courses}
                 draft={chatDraft}
                 onDraftChange={setChatDraft}
                 onSend={sendChatMessage}

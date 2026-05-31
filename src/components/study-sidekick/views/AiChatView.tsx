@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
-import type { StudyAgentConfirmation, StudySidekickActions } from "../types";
+import type { CourseSummary, StudyAgentConfirmation, StudySidekickActions } from "../types";
+import { fileSizeLabel } from "../lib/client-utils";
 
 export type ChatMessage = {
   id: string;
@@ -17,6 +18,7 @@ export type ChatMessage = {
 
 type AiChatViewProps = {
   messages: ChatMessage[];
+  courses: CourseSummary[];
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: (message: string) => void;
@@ -56,6 +58,7 @@ const suggestions = [
 
 export default function AiChatView({
   messages,
+  courses,
   draft,
   onDraftChange,
   onSend,
@@ -66,10 +69,49 @@ export default function AiChatView({
   chatProviderStatus,
 }: AiChatViewProps) {
   const [search, setSearch] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [uploadCourseId, setUploadCourseId] = useState("");
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedUploadCourse = courses.find((course) => course.id === uploadCourseId);
 
-  const submit = () => {
+  const submit = async () => {
     if (isSending) return;
-    onSend(draft);
+    const trimmed = draft.trim();
+    if (!trimmed && !attachedFile) return;
+    if (attachedFile) {
+      if (!actions.onUploadMaterial) {
+        setUploadMessage("File uploads are not available in this environment.");
+        return;
+      }
+      if (!uploadCourseId) {
+        setUploadMessage("Choose the course this file belongs to first.");
+        return;
+      }
+      setIsUploading(true);
+      setUploadMessage(null);
+      try {
+        await actions.onUploadMaterial({
+          file: attachedFile,
+          title: attachedFile.name,
+          courseId: uploadCourseId,
+        });
+        const courseName = selectedUploadCourse?.name || "the selected course";
+        setAttachedFile(null);
+        setUploadCourseId("");
+        setUploadMessage(`Saved ${attachedFile.name} to ${courseName}.`);
+        onSend(
+          `${trimmed || "Use the file I just uploaded to help me understand this assignment."}\n\nUploaded material: ${attachedFile.name} (${courseName}).`,
+        );
+      } catch (error) {
+        setUploadMessage(error instanceof Error ? error.message : "Upload failed. Try a smaller file or paste notes instead.");
+      } finally {
+        setIsUploading(false);
+      }
+      return;
+    }
+    onSend(trimmed);
   };
 
   return (
@@ -251,13 +293,65 @@ export default function AiChatView({
           </div>
 
           <div className="p-md bg-surface-container-lowest rounded-b-lg">
+            {attachedFile ? (
+              <div className="mb-sm rounded-lg border-2 border-primary-fixed-dim bg-primary-container/25 p-sm">
+                <div className="flex flex-col gap-sm md:flex-row md:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-label-md text-label-md text-primary">One file ready for Sidekick</p>
+                    <p className="truncate font-body-sm text-body-sm text-on-surface-variant">
+                      {attachedFile.name} - {fileSizeLabel(attachedFile.size)}
+                    </p>
+                  </div>
+                  <select
+                    value={uploadCourseId}
+                    onChange={(event) => setUploadCourseId(event.target.value)}
+                    className="min-w-0 rounded-full border-2 border-surface-variant bg-white px-sm py-xs font-label-md text-label-md focus:border-primary focus:outline-none"
+                    disabled={isSending || isUploading}
+                  >
+                    <option value="">Choose course</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.courseCode || "Course"} - {course.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="rounded-full border border-primary-fixed-dim bg-white px-sm py-xs font-label-md text-label-md text-primary"
+                    onClick={() => {
+                      setAttachedFile(null);
+                      setUploadMessage(null);
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {uploadMessage ? (
+              <p className="mb-sm rounded-full border border-primary-fixed-dim bg-surface-container px-sm py-xs font-label-md text-label-md text-primary">
+                {uploadMessage}
+              </p>
+            ) : null}
             <div className="relative flex items-end gap-sm bg-surface-container rounded-lg p-sm border-2 border-surface-variant focus-within:border-primary focus-within:bg-white transition-all">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.ppt,.pptx,.doc,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,text/*,image/*,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setAttachedFile(file);
+                  setUploadMessage(file ? "Choose the course, then send your message." : null);
+                  event.target.value = "";
+                }}
+              />
               <button
                 type="button"
                 className="p-sm text-on-surface-variant hover:text-primary transition-colors"
-                onClick={() => onSend("Which files or lectures should I open for my most urgent assignment?")}
-                aria-label="Ask about files"
-                disabled={isSending}
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach one file"
+                disabled={isSending || isUploading || !actions.onUploadMaterial}
               >
                 <span className="material-symbols-outlined">attach_file</span>
               </button>
@@ -267,27 +361,27 @@ export default function AiChatView({
                 rows={1}
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
-                disabled={isSending}
+                disabled={isSending || isUploading}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    submit();
+                    void submit();
                   }
                 }}
               />
               <button
                 type="button"
                 className="bg-primary text-on-primary w-10 h-10 rounded-lg flex items-center justify-center bubbly-button disabled:opacity-60"
-                onClick={submit}
+                onClick={() => void submit()}
                 aria-label="Send message"
-                disabled={isSending || !draft.trim()}
+                disabled={isSending || isUploading || (!draft.trim() && !attachedFile)}
               >
-                <span className="material-symbols-outlined">{isSending ? "hourglass_top" : "send"}</span>
+                <span className="material-symbols-outlined">{isSending || isUploading ? "hourglass_top" : "send"}</span>
               </button>
             </div>
             <div className="mt-sm flex justify-center">
               <p className="font-label-sm text-label-sm text-outline">
-                Sidekick answers from synced Canvas data. Refresh Canvas when something looks stale.
+                Sidekick answers from synced Canvas data and one uploaded file at a time. Uploaded files are saved to Files under the chosen course.
               </p>
             </div>
           </div>

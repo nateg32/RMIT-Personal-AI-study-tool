@@ -125,12 +125,16 @@ export type StudyPlan = {
   contextConfidence?: "high" | "medium" | "low";
   contextSummary?: string[];
   needsUserContext?: boolean;
+  analysisSummary?: string;
   assignmentBrief?: string;
+  deliverables?: string[];
+  successCriteria?: string[];
   rubricFocus?: string[];
   blocks: StudyBlock[];
   checklist: string[];
   definitionOfDone: string[];
   resourcesToOpen: Array<{ title: string; url?: string }>;
+  resourcePlan?: Array<{ title: string; reason: string; url?: string }>;
   suggestedBreaks?: Array<{ afterBlock: string; minutes: number; reason: string }>;
   activeBlockIndex?: number;
   completedTasks?: Record<string, boolean>;
