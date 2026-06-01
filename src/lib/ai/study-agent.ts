@@ -44,6 +44,7 @@ export type StudyAgentEvent =
       type: "dashboard_item_hidden";
       itemType: "assignment" | "assignment_group" | "course";
       itemId: string;
+      assignmentId?: string | null;
       label: string;
       view: "dashboard";
     }
@@ -306,11 +307,15 @@ function wantsStudySession(message: string) {
 function wantsHide(message: string) {
   const hasHideVerb = /\b(hide|remove|delete|exclude|ignore)\b/i.test(message);
   const hasScopeWord = /\b(dashboard|scope|sidekick|view|list)\b/i.test(message);
-  const hasCompletionSignal = /\b(already|done|finished|completed|complete|submitted)\b/i.test(message);
+  const hasCompletionSignal = hasAssignmentCompletionSignal(message);
   const hasStudyObject = /\b(assignment|assignments|assessment|assessments|task|tasks|quiz|quizzes|activity|activities|milestone|lab|labs|course|subject|class)\b/i.test(
     message,
   );
   return hasHideVerb && (hasScopeWord || (hasCompletionSignal && hasStudyObject));
+}
+
+function hasAssignmentCompletionSignal(message: string) {
+  return /\b(already|done|finished|completed|complete|submitted|handed in|turned in)\b/i.test(message);
 }
 
 function wantsScopeReset(message: string) {
@@ -706,7 +711,7 @@ async function createStudySessionTool(input: StudyAgentInput, assignment: Canvas
 }
 
 function hideAssignmentConfirmation(input: StudyAgentInput, assignment: CanvasAssignmentSummary): StudyAgentResult {
-  const completionSignal = /\b(already|done|finished|completed|complete|submitted)\b/i.test(input.message);
+  const completionSignal = hasAssignmentCompletionSignal(input.message);
   return confirmationResult(
     input,
     {
@@ -756,6 +761,25 @@ async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssi
 
   const preferences = await getDashboardPreferences(input.user.id);
   const key = canvasAssignmentKey(saved.course.canvasCourseId, saved.canvasAssignmentId);
+  const shouldMarkDoneLocally = hasAssignmentCompletionSignal(input.message);
+  if (shouldMarkDoneLocally) {
+    await db.submission.upsert({
+      where: { assignmentId: saved.id },
+      create: {
+        assignmentId: saved.id,
+        submittedAt: new Date(),
+        workflowState: "submitted_elsewhere",
+        missing: false,
+        late: false,
+      },
+      update: {
+        submittedAt: new Date(),
+        workflowState: "submitted_elsewhere",
+        missing: false,
+        late: false,
+      },
+    });
+  }
   await saveDashboardPreferences(input.user.id, {
     ...preferences,
     excludedAssignmentIds: Array.from(new Set([...preferences.excludedAssignmentIds, saved.id])),
@@ -766,7 +790,7 @@ async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssi
   await auditLog({
     userId: input.user.id,
     action: "study_agent.assignment_hidden",
-    metadata: { assignmentId: saved.id, canvasAssignmentId: saved.canvasAssignmentId },
+    metadata: { assignmentId: saved.id, canvasAssignmentId: saved.canvasAssignmentId, markedDoneLocally: shouldMarkDoneLocally },
   });
 
   return {
@@ -777,11 +801,14 @@ async function hideAssignmentTool(input: StudyAgentInput, assignment: CanvasAssi
         type: "dashboard_item_hidden" as const,
         itemType: "assignment" as const,
         itemId: saved.id,
+        assignmentId: saved.id,
         label: `Hidden from dashboard: ${assignment.name}`,
         view: "dashboard" as const,
       },
     ],
-    answer: `Done. I hid "${assignment.name}" from your dashboard scope and future Canvas syncs. You can restore it from Settings by resetting the dashboard scope.`,
+    answer: shouldMarkDoneLocally
+      ? `Done. I marked "${assignment.name}" as done inside Sidekick and hid it from your dashboard scope. Canvas stays read-only.`
+      : `Done. I hid "${assignment.name}" from your dashboard scope and future Canvas syncs. You can restore it from Settings by resetting the dashboard scope.`,
   };
 }
 

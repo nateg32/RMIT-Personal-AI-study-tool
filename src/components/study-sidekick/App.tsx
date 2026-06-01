@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ViewType } from "./lib/utils";
+import {
+  assignmentBelongsToCourse,
+  markAssignmentSubmittedElsewhere,
+  removeCourseDashboardData,
+  removeDashboardAssignments,
+  scrubDailyBriefAssignments,
+} from "./lib/dashboard-state";
 import SideNav from "./components/SideNav";
 import DashboardView from "./views/DashboardView";
 import AssignmentsView from "./views/AssignmentsView";
@@ -127,6 +134,9 @@ type ChatAgentEvent = {
   type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
   label: string;
   assignmentId?: string | null;
+  itemType?: "assignment" | "assignment_group" | "course";
+  itemId?: string | null;
+  sessionId?: string | null;
   view?: ViewType;
 };
 
@@ -529,21 +539,60 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   );
 
   const removeAssignmentEverywhere = useCallback((assignmentId: string) => {
+    const removedAssignments = [
+      ...assignments,
+      ...(dashboard.priorityItems || []),
+      ...dashboard.dueToday,
+      ...dashboard.dueThisWeek,
+      ...dashboard.unsubmitted,
+    ].filter((assignment) => assignment.id === assignmentId);
     setAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
-    setDashboard((current) => ({
-      ...current,
-      dueToday: current.dueToday.filter((assignment) => assignment.id !== assignmentId),
-      dueThisWeek: current.dueThisWeek.filter((assignment) => assignment.id !== assignmentId),
-      unsubmitted: current.unsubmitted.filter((assignment) => assignment.id !== assignmentId),
-      priorityItems: current.priorityItems?.filter((assignment) => assignment.id !== assignmentId),
-    }));
-  }, []);
+    setFiles((current) => current.filter((file) => file.assignmentId !== assignmentId));
+    setDashboard((current) =>
+      removeDashboardAssignments(current, (assignment) => assignment.id === assignmentId, {
+        reduceAssignmentCount: true,
+      }),
+    );
+    setDailyBrief((current) => scrubDailyBriefAssignments(current, removedAssignments));
+  }, [assignments, dashboard.dueThisWeek, dashboard.dueToday, dashboard.priorityItems, dashboard.unsubmitted]);
+
+  const removeCourseAssignmentsEverywhere = useCallback(
+    (courseId: string) => {
+      const courseName = courses.find((course) => course.id === courseId)?.name;
+      const matchesCourse = (assignment: AssignmentSummary) => assignmentBelongsToCourse(assignment, courseId, courseName);
+      const removedAssignments = [
+        ...assignments,
+        ...(dashboard.priorityItems || []),
+        ...dashboard.dueToday,
+        ...dashboard.dueThisWeek,
+        ...dashboard.unsubmitted,
+      ].filter(matchesCourse);
+      const removedAssignmentIds = new Set(removedAssignments.map((assignment) => assignment.id));
+
+      setAssignments((current) => current.filter((assignment) => !matchesCourse(assignment)));
+      setFiles((current) => current.filter((file) => !file.assignmentId || !removedAssignmentIds.has(file.assignmentId)));
+      setDashboard((current) =>
+        removeDashboardAssignments(current, matchesCourse, {
+          reduceAssignmentCount: true,
+        }),
+      );
+      setDailyBrief((current) => scrubDailyBriefAssignments(current, removedAssignments));
+    },
+    [assignments, courses, dashboard.dueThisWeek, dashboard.dueToday, dashboard.priorityItems, dashboard.unsubmitted],
+  );
 
   const removeCourseEverywhere = useCallback(
     (courseId: string) => {
-      const courseName = courses.find((course) => course.id === courseId)?.name;
-      const matchesCourse = (assignment: AssignmentSummary) =>
-        assignment.courseId === courseId || Boolean(courseName && assignment.courseName === courseName);
+      const course = courses.find((item) => item.id === courseId) || null;
+      const courseName = course?.name;
+      const matchesCourse = (assignment: AssignmentSummary) => assignmentBelongsToCourse(assignment, courseId, courseName);
+      const removedAssignments = [
+        ...assignments,
+        ...(dashboard.priorityItems || []),
+        ...dashboard.dueToday,
+        ...dashboard.dueThisWeek,
+        ...dashboard.unsubmitted,
+      ].filter(matchesCourse);
 
       setCourses((current) => current.filter((course) => course.id !== courseId));
       setAssignments((current) => current.filter((assignment) => !matchesCourse(assignment)));
@@ -551,18 +600,10 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         current.filter((file) => file.courseId !== courseId && (!courseName || file.courseName !== courseName)),
       );
       setAnnouncements((current) => current.filter((announcement) => !courseName || announcement.courseName !== courseName));
-      setDashboard((current) => ({
-        ...current,
-        dueToday: current.dueToday.filter((assignment) => !matchesCourse(assignment)),
-        dueThisWeek: current.dueThisWeek.filter((assignment) => !matchesCourse(assignment)),
-        unsubmitted: current.unsubmitted.filter((assignment) => !matchesCourse(assignment)),
-        priorityItems: current.priorityItems?.filter((assignment) => !matchesCourse(assignment)),
-        courseBreakdown: current.courseBreakdown?.filter(
-          (course) => course.courseId !== courseId && (!courseName || course.name !== courseName),
-        ),
-      }));
+      setDashboard((current) => removeCourseDashboardData(current, course));
+      setDailyBrief((current) => scrubDailyBriefAssignments(current, removedAssignments));
     },
-    [courses],
+    [assignments, courses, dashboard.dueThisWeek, dashboard.dueToday, dashboard.priorityItems, dashboard.unsubmitted],
   );
 
   const updateDashboardScope = useCallback(
@@ -664,33 +705,18 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         });
         if (status === "submitted_elsewhere") {
           const submittedAt = new Date().toISOString();
+          const submittedAssignments = assignments
+            .filter((assignment) => assignment.id === assignmentId)
+            .map((assignment) => markAssignmentSubmittedElsewhere(assignment, submittedAt));
           setAssignments((current) =>
             current.map((assignment) =>
               assignment.id === assignmentId
-                ? {
-                    ...assignment,
-                    submittedAt,
-                    workflowState: "submitted_elsewhere",
-                    dueStatus: "submitted",
-                    missing: false,
-                    late: false,
-                  }
+                ? markAssignmentSubmittedElsewhere(assignment, submittedAt)
                 : assignment,
             ),
           );
-          setDashboard((current) => ({
-            ...current,
-            dueToday: current.dueToday.filter((assignment) => assignment.id !== assignmentId),
-            dueThisWeek: current.dueThisWeek.filter((assignment) => assignment.id !== assignmentId),
-            unsubmitted: current.unsubmitted.filter((assignment) => assignment.id !== assignmentId),
-            priorityItems: current.priorityItems?.filter((assignment) => assignment.id !== assignmentId),
-            syncSummary: current.syncSummary
-              ? {
-                  ...current.syncSummary,
-                  unsubmittedAssignments: Math.max(current.syncSummary.unsubmittedAssignments - 1, 0),
-                }
-              : current.syncSummary,
-          }));
+          setDashboard((current) => removeDashboardAssignments(current, (assignment) => assignment.id === assignmentId));
+          setDailyBrief((current) => scrubDailyBriefAssignments(current, submittedAssignments));
         }
         setActionMessage(
           status === "submitted_elsewhere"
@@ -706,7 +732,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         endOperation(operation);
       }
     },
-    [beginOperation, endOperation, refreshData],
+    [assignments, beginOperation, endOperation, refreshData],
   );
 
   const uploadMaterial = useCallback(
@@ -845,16 +871,25 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         );
       }
       if (payload.agentEvents?.length) {
+        payload.agentEvents.forEach((event) => {
+          if (event.type === "dashboard_item_hidden") {
+            if (event.itemType === "assignment" && event.itemId) removeAssignmentEverywhere(event.itemId);
+            if (event.itemType === "assignment_group" && event.itemId) removeCourseAssignmentsEverywhere(event.itemId);
+            if (event.itemType === "course" && event.itemId) removeCourseEverywhere(event.itemId);
+          }
+        });
         const firstEvent = payload.agentEvents[0];
         setActionMessage(firstEvent.label);
-        if (firstEvent.assignmentId) setSelectedAssignmentId(firstEvent.assignmentId);
+        if (firstEvent.assignmentId || (firstEvent.itemType === "assignment" && firstEvent.itemId)) {
+          setSelectedAssignmentId(firstEvent.assignmentId || firstEvent.itemId || null);
+        }
         if (firstEvent.view === "sessions") setActiveView("sessions");
         void refreshData().catch((error) => {
           setActionMessage(error instanceof Error ? error.message : "Agent action completed, but refresh failed.");
         });
       }
     },
-    [refreshData],
+    [refreshData, removeAssignmentEverywhere, removeCourseAssignmentsEverywhere, removeCourseEverywhere],
   );
 
   const sendChatMessage = useCallback(
