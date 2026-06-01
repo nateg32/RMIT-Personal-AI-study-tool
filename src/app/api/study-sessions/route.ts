@@ -102,9 +102,10 @@ export async function POST(request: Request) {
       extraContext: input.customFocus,
     });
 
+    let session = null;
     if (!isDemoUser(user) && env.DATABASE_URL) {
       const db = getDb();
-      await db.studySession.create({
+      session = await db.studySession.create({
         data: {
           userId: user.id,
           assignmentId: assignment?.id || null,
@@ -115,6 +116,7 @@ export async function POST(request: Request) {
           energyLevel: input.energyLevel,
           generatedPlanJson: plan as Prisma.InputJsonValue,
         },
+        include: { assignment: { include: { course: true } } },
       });
       await auditLog({
         userId: user.id,
@@ -123,7 +125,7 @@ export async function POST(request: Request) {
       });
     }
 
-    return jsonOk({ ok: true, plan });
+    return jsonOk({ ok: true, plan, session });
   } catch (error) {
     return jsonError(error, 400);
   }

@@ -221,6 +221,11 @@ function recentChatContextMessages(messages: ChatMessage[]) {
     }));
 }
 
+function upsertStudySession(current: StudySessionRecord[], session: StudySessionRecord) {
+  const next = [session, ...current.filter((item) => item.id !== session.id)];
+  return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+}
+
 function loadStoredChatMessages() {
   if (typeof window === "undefined") return [welcomeMessage()];
   try {
@@ -491,13 +496,20 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       const operation = beginOperation({ type: "session", label: "Study session planning", view: "sessions" });
       if (!operation) return;
       setIsCreatingSession(true);
-      setActionMessage("Building a Canvas-specific study session...");
+      setActionMessage(input.assignmentId ? "Building a Canvas-specific study session..." : "Saving your custom focus session...");
       try {
-        await apiJson<{ ok: boolean; plan: StudyPlan }>("/api/study-sessions", {
+        const payload = await apiJson<{ ok: boolean; plan: StudyPlan; session?: StudySessionRecord | null }>("/api/study-sessions", {
           method: "POST",
           body: JSON.stringify(input),
         });
-        await refreshData();
+        if (payload.session) {
+          setStudySessions((current) => upsertStudySession(current, payload.session as StudySessionRecord));
+        }
+        try {
+          await refreshData();
+        } catch {
+          // The session is already saved; keep the UI responsive even if a secondary dashboard refresh fails.
+        }
         setSelectedAssignmentId(input.assignmentId || null);
         setActiveView("sessions");
         setActionMessage(
