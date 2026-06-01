@@ -48,6 +48,8 @@ const defaultSessionSettings = {
   targetOutcome: "Credit",
 };
 const newCustomSessionId = "__new_custom_session";
+const emptyCompletedTasks: Record<string, boolean> = {};
+const emptyChecklist: string[] = [];
 
 type SessionSource = "canvas" | "custom";
 type FocusStage = "brief" | "lock" | "focus" | "break";
@@ -427,6 +429,13 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const [memoryRound, setMemoryRound] = useState(1);
   const [memoryPattern, setMemoryPattern] = useState(() => buildMemoryPattern());
   const [memoryInput, setMemoryInput] = useState<number[]>([]);
+  const [localCompletion, setLocalCompletion] = useState<{ key: string; tasks: Record<string, boolean> }>({
+    key: "",
+    tasks: {},
+  });
+  const [reflectionSelected, setReflectionSelected] = useState<string[]>([]);
+  const [reflectionCustomText, setReflectionCustomText] = useState("");
+  const [reflectionMessage, setReflectionMessage] = useState<string | null>(null);
   const [timerState, setTimerState] = useState({ key: "", secondsLeft: defaultDuration * 60, running: false });
   const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
   const [checklistDraft, setChecklistDraft] = useState("");
@@ -467,8 +476,14 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     [timerKey, timerState, totalSeconds],
   );
   const { secondsLeft, running } = timer;
-  const completedMap = plan.completedTasks || {};
-  const checklist = plan.checklist || [];
+  const completionKey = activeSession?.id || (sessionSource === "custom" ? "custom-draft" : selectedAssignment?.id || "draft");
+  const currentLocalCompletedTasks = localCompletion.key === completionKey ? localCompletion.tasks : emptyCompletedTasks;
+  const persistedCompletedMap = plan.completedTasks || emptyCompletedTasks;
+  const completedMap = useMemo(
+    () => ({ ...persistedCompletedMap, ...currentLocalCompletedTasks }),
+    [currentLocalCompletedTasks, persistedCompletedMap],
+  );
+  const checklist = plan.checklist || emptyChecklist;
   const completedCount = checklist.filter((item) => completedMap[item]).length;
   const progressRatio = totalSeconds ? (totalSeconds - secondsLeft) / totalSeconds : 0;
   const activeBlockTasksText = (activeBlock?.tasks || []).join("\n");
@@ -497,6 +512,19 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const customReady =
     Boolean(customTitle.trim()) &&
     (Boolean(customFocus.trim()) || customBlocks.some((block) => block.tasks.trim()));
+  const reflectionCandidates = useMemo(
+    () =>
+      Array.from(new Set([...(activeBlock?.tasks || []), ...checklist].map((item) => cleanPlanText(item, 120)).filter(Boolean)))
+        .sort((left, right) => Number(Boolean(completedMap[left])) - Number(Boolean(completedMap[right])))
+        .slice(0, 8),
+    [activeBlock?.tasks, checklist, completedMap],
+  );
+
+  const resetReflection = () => {
+    setReflectionSelected([]);
+    setReflectionCustomText("");
+    setReflectionMessage(null);
+  };
 
   useEffect(() => {
     if (sessionSource !== "custom") {
@@ -549,6 +577,9 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     ).catch(() => undefined);
     if (focusFullscreen) {
       window.setTimeout(() => {
+        setReflectionSelected([]);
+        setReflectionCustomText("");
+        setReflectionMessage(null);
         setFocusStage("break");
         setBreakMode("breathe");
         setBreakSecondsLeft(isLastBlock ? 0 : Math.max(60, activeBreakMinutes * 60));
@@ -606,7 +637,10 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
         mode: "Custom focus",
         energyLevel: "Manual",
         targetOutcome: "Just complete",
-        manualPlan: customDraftPlan,
+        manualPlan: {
+          ...customDraftPlan,
+          completedTasks: currentLocalCompletedTasks,
+        },
       });
       return;
     }
@@ -637,15 +671,40 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const toggleChecklist = async (item: string) => {
-    if (!activeSession || actionsDisabled) return;
+    if (actionsDisabled) return;
+    const nextValue = !completedMap[item];
+    setLocalCompletion((current) => ({
+      key: completionKey,
+      tasks: {
+        ...(current.key === completionKey ? current.tasks : {}),
+        [item]: nextValue,
+      },
+    }));
+    if (!activeSession) return;
     const nextPlan: StudyPlan = {
       ...plan,
       completedTasks: {
         ...completedMap,
-        [item]: !completedMap[item],
+        [item]: nextValue,
       },
     };
-    await onUpdateSession(activeSession.id, nextPlan, completedMap[item] ? "planned" : "in_progress");
+    try {
+      await onUpdateSession(activeSession.id, nextPlan, nextValue ? "in_progress" : activeSession.status || "planned");
+      setLocalCompletion((current) => {
+        if (current.key !== completionKey) return current;
+        const next = { ...current.tasks };
+        delete next[item];
+        return { key: completionKey, tasks: next };
+      });
+    } catch {
+      setLocalCompletion((current) => ({
+        key: completionKey,
+        tasks: {
+          ...(current.key === completionKey ? current.tasks : {}),
+          [item]: !nextValue,
+        },
+      }));
+    }
   };
 
   const openPlanEditor = () => {
@@ -737,6 +796,50 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     setBreakSecondsLeft(0);
     setFocusStage("brief");
     setMemoryInput([]);
+    resetReflection();
+  };
+
+  const toggleReflectionItem = (item: string) => {
+    setReflectionSelected((current) =>
+      current.includes(item) ? current.filter((selected) => selected !== item) : [...current, item],
+    );
+    setReflectionMessage(null);
+  };
+
+  const saveReflection = async () => {
+    if (!activeSession || actionsDisabled) return;
+    const selectedItems = reflectionSelected.map((item) => cleanPlanText(item, 140)).filter(Boolean);
+    const customItems = textLines(reflectionCustomText).map((item) => cleanPlanText(item, 140)).filter(Boolean);
+    const finishedItems = Array.from(new Set([...selectedItems, ...customItems]));
+
+    if (!finishedItems.length) {
+      setReflectionMessage("Pick one item or add a quick note first.");
+      return;
+    }
+
+    const nextChecklist = Array.from(new Set([...checklist, ...customItems]));
+    const nextCompletedTasks = {
+      ...completedMap,
+      ...Object.fromEntries(finishedItems.map((item) => [item, true])),
+    };
+    const nextPlan: StudyPlan = {
+      ...plan,
+      checklist: nextChecklist.length ? nextChecklist : checklist,
+      completedTasks: nextCompletedTasks,
+      activeBlockIndex: safeActiveBlockIndex,
+    };
+
+    setLocalCompletion((current) => ({
+      key: completionKey,
+      tasks: {
+        ...(current.key === completionKey ? current.tasks : {}),
+        ...Object.fromEntries(finishedItems.map((item) => [item, true])),
+      },
+    }));
+    await onUpdateSession(activeSession.id, nextPlan, isLastBlock ? "completed" : "in_progress");
+    setReflectionSelected([]);
+    setReflectionCustomText("");
+    setReflectionMessage(`${finishedItems.length} item${finishedItems.length === 1 ? "" : "s"} saved to your checklist.`);
   };
 
   const handleMemoryTap = (index: number) => {
@@ -956,6 +1059,60 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     </p>
                   </div>
                 ) : null}
+
+                <div className="mt-lg rounded-lg border-2 border-primary-fixed-dim bg-white/90 p-md text-left shadow-sm">
+                  <div className="flex items-start justify-between gap-sm">
+                    <div>
+                      <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Progress check</p>
+                      <h3 className="mt-xs font-headline-sm text-headline-sm text-on-surface">What did you get done?</h3>
+                    </div>
+                    <span className="material-symbols-outlined text-primary">task_alt</span>
+                  </div>
+                  <div className="mt-sm flex flex-wrap gap-xs">
+                    {reflectionCandidates.map((item) => {
+                      const selected = reflectionSelected.includes(item);
+                      const completed = Boolean(completedMap[item]);
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          className={`rounded-full border-2 px-sm py-xs font-label-md text-label-md transition ${
+                            selected || completed
+                              ? "border-primary bg-primary-container text-primary"
+                              : "border-surface-variant bg-white text-on-surface-variant hover:border-primary-fixed"
+                          }`}
+                          onClick={() => toggleReflectionItem(item)}
+                        >
+                          {completed ? "✓ " : selected ? "+ " : ""}
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={reflectionCustomText}
+                    onChange={(event) => {
+                      setReflectionCustomText(event.target.value);
+                      setReflectionMessage(null);
+                    }}
+                    className="mt-sm min-h-20 w-full resize-none rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
+                    placeholder="Or add what you finished, one item per line..."
+                    maxLength={500}
+                  />
+                  <div className="mt-sm flex flex-wrap items-center gap-sm">
+                    <button
+                      type="button"
+                      className="rounded-full bg-primary px-md py-xs font-label-md text-label-md text-on-primary disabled:opacity-60"
+                      onClick={() => void saveReflection()}
+                      disabled={actionsDisabled}
+                    >
+                      Save progress
+                    </button>
+                    {reflectionMessage ? (
+                      <span className="font-label-md text-label-md text-on-surface-variant">{reflectionMessage}</span>
+                    ) : null}
+                  </div>
+                </div>
 
                 {!isLastBlock ? (
                   <div className="mt-lg rounded-lg border-2 border-primary-fixed-dim bg-white/85 p-md">
@@ -1566,7 +1723,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                         type="button"
                         className="flex w-full items-center gap-sm rounded-lg border-2 border-transparent bg-surface-container-lowest p-sm text-left transition-all hover:border-primary-fixed"
                         onClick={() => toggleChecklist(item)}
-                        disabled={!activeSession || actionsDisabled}
+                        disabled={actionsDisabled}
                         title={actions.disabledReason || undefined}
                       >
                         <span
