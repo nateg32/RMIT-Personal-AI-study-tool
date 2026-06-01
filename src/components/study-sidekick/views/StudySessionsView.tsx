@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ViewHeader from "../components/ViewHeader";
 import type {
   AssignmentSummary,
@@ -48,6 +49,7 @@ const defaultSessionSettings = {
   targetOutcome: "Credit",
 };
 const newCustomSessionId = "__new_custom_session";
+const focusLaunchStoragePrefix = "study-sidekick-focus-launch:";
 const emptyCompletedTasks: Record<string, boolean> = {};
 const emptyChecklist: string[] = [];
 
@@ -58,6 +60,15 @@ type CustomBlockDraft = {
   name: string;
   minutes: string;
   tasks: string;
+};
+type FocusLaunchPayload = {
+  source: SessionSource;
+  assignmentId: string | null;
+  customSessionId: string | null;
+  plan: StudyPlan;
+  activeBlockIndex: number;
+  duration: number;
+  createdAt: number;
 };
 
 function clampMinutes(value: number) {
@@ -82,6 +93,14 @@ function createCustomBlockDraft(index = 0): CustomBlockDraft {
     minutes: index === 0 ? "25" : "15",
     tasks: "",
   };
+}
+
+function randomLaunchKey() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function focusLaunchStorageKey(key: string) {
+  return `${focusLaunchStoragePrefix}${key}`;
 }
 
 function customBlockTasks(block: CustomBlockDraft, fallbackFocus: string) {
@@ -441,6 +460,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const [checklistDraft, setChecklistDraft] = useState("");
   const completedTimerKeys = useRef(new Set<string>());
   const customSessionCountRef = useRef(sessions.filter((session) => !session.assignmentId).length);
+  const focusLaunchHandledRef = useRef(false);
 
   const customSessions = useMemo(() => sessions.filter((session) => !session.assignmentId), [sessions]);
   const selectedCustomSession =
@@ -540,6 +560,75 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     }
     customSessionCountRef.current = customSessions.length;
   }, [customSessions, isCreatingSession, selectedCustomSessionId, sessionSource]);
+
+  useEffect(() => {
+    if (focusLaunchHandledRef.current || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("focus") !== "1") return;
+
+    const sessionId = params.get("sessionId");
+    const assignmentId = params.get("assignmentId");
+    const customSessionId = params.get("customSessionId");
+    const draftKey = params.get("draftKey");
+    const blockIndex = Number(params.get("block") || 0);
+    const scheduleFocusLaunch = (launch: () => void) => {
+      focusLaunchHandledRef.current = true;
+      window.history.replaceState(null, "", window.location.pathname);
+      window.setTimeout(launch, 0);
+    };
+
+    if (sessionId) {
+      const matchedSession = sessions.find((session) => session.id === sessionId);
+      if (!matchedSession) return;
+      scheduleFocusLaunch(() => {
+        if (matchedSession.assignmentId) {
+          setSessionSource("canvas");
+          onSelectAssignment(matchedSession.assignmentId);
+        } else {
+          setSessionSource("custom");
+          setSelectedCustomSessionId(matchedSession.id);
+        }
+        setActiveBlockIndex(Math.max(0, blockIndex));
+        setFocusStage("brief");
+        setFocusFullscreen(true);
+      });
+    } else if (assignmentId && assignments.some((assignment) => assignment.id === assignmentId)) {
+      scheduleFocusLaunch(() => {
+        setSessionSource("canvas");
+        onSelectAssignment(assignmentId);
+        setActiveBlockIndex(Math.max(0, blockIndex));
+        setFocusStage("brief");
+        setFocusFullscreen(true);
+      });
+    } else if (customSessionId && customSessions.some((session) => session.id === customSessionId)) {
+      scheduleFocusLaunch(() => {
+        setSessionSource("custom");
+        setSelectedCustomSessionId(customSessionId);
+        setActiveBlockIndex(Math.max(0, blockIndex));
+        setFocusStage("brief");
+        setFocusFullscreen(true);
+      });
+    } else if (draftKey) {
+      try {
+        const stored = window.localStorage.getItem(focusLaunchStorageKey(draftKey));
+        if (!stored) return;
+        const payload = JSON.parse(stored) as FocusLaunchPayload;
+        if (!payload || Date.now() - payload.createdAt > 10 * 60 * 1000) return;
+        window.localStorage.removeItem(focusLaunchStorageKey(draftKey));
+        scheduleFocusLaunch(() => {
+          setSessionSource(payload.source);
+          if (payload.assignmentId) onSelectAssignment(payload.assignmentId);
+          if (payload.customSessionId) setSelectedCustomSessionId(payload.customSessionId);
+          setDuration(payload.duration);
+          setActiveBlockIndex(Math.max(0, payload.activeBlockIndex));
+          setFocusStage("brief");
+          setFocusFullscreen(true);
+        });
+      } catch {
+        window.localStorage.removeItem(focusLaunchStorageKey(draftKey));
+      }
+    }
+  }, [assignments, customSessions, onSelectAssignment, sessions]);
 
   useEffect(() => {
     if (!running) return;
@@ -762,21 +851,23 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   };
 
   const startFocusTimer = () => {
-    if (actionsDisabled || !activeSession) return;
-    void onUpdateSession(
-      activeSession.id,
-      {
-        ...plan,
-        activeBlockIndex: safeActiveBlockIndex,
-      },
-      "in_progress",
-    ).catch(() => undefined);
+    if (actionsDisabled) return;
+    if (activeSession) {
+      void onUpdateSession(
+        activeSession.id,
+        {
+          ...plan,
+          activeBlockIndex: safeActiveBlockIndex,
+        },
+        "in_progress",
+      ).catch(() => undefined);
+    }
     setFocusStage("focus");
     setTimerState({ ...timer, running: true });
   };
 
   const openFocusPreview = () => {
-    if (!activeSession || actionsDisabled) return;
+    if (actionsDisabled) return;
     setFocusStage("brief");
     setFocusFullscreen(true);
   };
@@ -886,18 +977,62 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     );
   };
 
-  return (
-    <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
-      {focusFullscreen ? (
-        <div className="fixed inset-0 z-50 flex min-h-[100dvh] overflow-hidden bg-background text-on-surface">
+  const openDashboard = () => {
+    window.location.assign("/dashboard");
+  };
+
+  const openFocusInNewTab = () => {
+    const url = new URL("/study-sessions", window.location.origin);
+    url.searchParams.set("focus", "1");
+    url.searchParams.set("block", String(safeActiveBlockIndex));
+
+    if (activeSession) {
+      url.searchParams.set("sessionId", activeSession.id);
+    } else if (selectedAssignment?.id) {
+      url.searchParams.set("assignmentId", selectedAssignment.id);
+    } else {
+      const draftKey = randomLaunchKey();
+      const payload: FocusLaunchPayload = {
+        source: sessionSource,
+        assignmentId: selectedAssignment?.id || null,
+        customSessionId: selectedCustomSession?.id || null,
+        plan,
+        activeBlockIndex: safeActiveBlockIndex,
+        duration,
+        createdAt: Date.now(),
+      };
+      window.localStorage.setItem(focusLaunchStorageKey(draftKey), JSON.stringify(payload));
+      url.searchParams.set("draftKey", draftKey);
+    }
+
+    const focusWindow = window.open(url.toString(), "_blank", "noopener,noreferrer");
+    if (!focusWindow) {
+      setFocusStage("brief");
+      setFocusFullscreen(true);
+    }
+  };
+
+  const focusOverlay =
+    focusFullscreen && typeof document !== "undefined"
+      ? createPortal(
+        <div className="fixed inset-0 left-0 top-0 z-[9999] isolate flex h-[100dvh] w-screen overflow-hidden overscroll-contain bg-background text-on-surface">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(205,239,184,0.42),transparent_48%)]" />
-          <button
-            type="button"
-            className="absolute right-md top-md z-10 rounded-full border border-primary-fixed-dim bg-white/90 px-sm py-xs font-label-md text-label-md text-primary"
-            onClick={() => setFocusFullscreen(false)}
-          >
-            Exit
-          </button>
+          <div className="absolute right-md top-md z-20 flex gap-xs">
+            <button
+              type="button"
+              className="rounded-full border border-primary-fixed-dim bg-white/90 px-sm py-xs font-label-md text-label-md text-primary shadow-sm"
+              onClick={openDashboard}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-primary-fixed-dim bg-white/90 px-sm py-xs font-label-md text-label-md text-primary shadow-sm"
+              onClick={() => setFocusFullscreen(false)}
+            >
+              Exit
+            </button>
+          </div>
 
           {focusStage === "brief" ? (
             <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-4xl flex-col justify-center px-lg py-xl">
@@ -1212,8 +1347,14 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
               </aside>
             </div>
           ) : null}
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+      : null;
+
+  return (
+    <div className="min-h-screen px-margin-desktop pb-lg flex flex-col">
+      {focusOverlay}
 
       <ViewHeader actions={actions} />
 
@@ -1750,7 +1891,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg"
                       onClick={openFocusPreview}
-                      disabled={!activeSession || actionsDisabled}
+                      disabled={actionsDisabled}
                       title={actions.disabledReason || undefined}
                     >
                       <span className="material-symbols-outlined">play_circle</span>
@@ -1759,12 +1900,12 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     <button
                       type="button"
                       className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full border-2 border-primary-fixed-dim bg-white py-sm font-label-md text-label-md text-primary"
-                      onClick={openFocusPreview}
-                      disabled={!activeSession || actionsDisabled}
+                      onClick={openFocusInNewTab}
+                      disabled={actionsDisabled}
                       title={actions.disabledReason || undefined}
                     >
-                      <span className="material-symbols-outlined">fullscreen</span>
-                      Preview focus mode
+                      <span className="material-symbols-outlined">open_in_new</span>
+                      Open focus tab
                     </button>
                     <button
                       type="button"
