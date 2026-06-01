@@ -22,6 +22,13 @@ import AiChatView, { type ChatMessage } from "./views/AiChatView";
 import SettingsView from "./views/SettingsView";
 import SupportView from "./views/SupportView";
 import FocusMiniTimer from "./components/FocusMiniTimer";
+import {
+  FOCUS_TIMER_EVENT,
+  type FocusTimerSnapshot,
+  focusTimerSecondsLeft,
+  isFocusTimerSnapshotVisible,
+  readFocusTimerSnapshot,
+} from "./lib/focus-timer";
 import type {
   ActiveOperation,
   AnnouncementSummary,
@@ -129,6 +136,7 @@ const CHAT_STORAGE_KEY = "study-sidekick-chat-v1";
 const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const OPERATION_STORAGE_KEY = "study-sidekick-active-operation-v1";
 const OPERATION_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+const FOCUS_UNLOAD_PROMPT_KEY = "study-sidekick-focus-unload-prompt-v1";
 
 type ChatAgentEvent = {
   type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
@@ -155,6 +163,12 @@ type ChatNotice = {
   body: string;
   tone: "found" | "waiting";
 } | null;
+
+function focusClock(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
+}
 
 function operationId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -276,6 +290,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadStoredChatMessages);
   const [chatNotice, setChatNotice] = useState<ChatNotice>(null);
+  const [focusResumePrompt, setFocusResumePrompt] = useState<FocusTimerSnapshot | null>(null);
+  const [focusResumeNow, setFocusResumeNow] = useState(() => Date.now());
   const chatSendingRef = useRef(false);
   const activeOperationRef = useRef<ActiveOperation | null>(null);
   const activeViewRef = useRef<ViewType>(initialView);
@@ -289,6 +305,56 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   useEffect(() => {
     window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(serialisableChatMessages(chatMessages)));
   }, [chatMessages]);
+
+  useEffect(() => {
+    const snapshot = readFocusTimerSnapshot();
+    const reloadAttempted = Boolean(window.sessionStorage.getItem(FOCUS_UNLOAD_PROMPT_KEY));
+    const isFocusLaunch = new URLSearchParams(window.location.search).get("focus") === "1";
+    window.sessionStorage.removeItem(FOCUS_UNLOAD_PROMPT_KEY);
+
+    if (!isFocusLaunch && snapshot && isFocusTimerSnapshotVisible(snapshot) && (reloadAttempted || snapshot.running)) {
+      setFocusResumePrompt(snapshot);
+    }
+
+    const handleFocusTimerChange = (event: Event) => {
+      const detail = event instanceof CustomEvent ? (event.detail as FocusTimerSnapshot | null) : null;
+      if (!detail || !isFocusTimerSnapshotVisible(detail)) {
+        setFocusResumePrompt(null);
+        return;
+      }
+      setFocusResumePrompt((current) => (current ? detail : current));
+    };
+
+    window.addEventListener(FOCUS_TIMER_EVENT, handleFocusTimerChange);
+    return () => window.removeEventListener(FOCUS_TIMER_EVENT, handleFocusTimerChange);
+  }, []);
+
+  useEffect(() => {
+    if (!focusResumePrompt) return;
+    const interval = window.setInterval(() => setFocusResumeNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [focusResumePrompt]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      const snapshot = readFocusTimerSnapshot();
+      const secondsLeft = snapshot ? focusTimerSecondsLeft(snapshot) : 0;
+      const hasActiveFocus = Boolean(snapshot && isFocusTimerSnapshotVisible(snapshot) && secondsLeft > 0);
+      const storedOperation = readStoredOperation();
+      const hasActiveOperation = Boolean(
+        isFreshOperation(activeOperationRef.current) || isFreshOperation(storedOperation),
+      );
+
+      if (!hasActiveFocus && !hasActiveOperation) return;
+      if (hasActiveFocus) window.sessionStorage.setItem(FOCUS_UNLOAD_PROMPT_KEY, String(Date.now()));
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1137,6 +1203,10 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     [chatMessages],
   );
   const chatNeedsAttention = activeView !== "chat" && (hasPendingChatConfirmation || Boolean(chatNotice));
+  const focusResumeSecondsLeft = focusResumePrompt ? focusTimerSecondsLeft(focusResumePrompt, focusResumeNow) : 0;
+  const showFocusResumePrompt = Boolean(
+    focusResumePrompt && isFocusTimerSnapshotVisible(focusResumePrompt, focusResumeNow),
+  );
 
   useEffect(() => {
     if (activeView === "chat" || !hasPendingChatConfirmation || chatNotice) return;
@@ -1240,6 +1310,46 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
               </div>
             </div>
           </button>
+        ) : null}
+        {showFocusResumePrompt && focusResumePrompt ? (
+          <div className="fixed bottom-44 right-6 z-[70] w-[min(23rem,calc(100vw-2rem))] rounded-lg border-2 border-primary-fixed-dim bg-surface-container-lowest/95 p-md shadow-xl backdrop-blur-md md:bottom-28">
+            <div className="flex items-start gap-sm">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-container text-primary">
+                <span className="material-symbols-outlined text-[22px]">restore</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-label-lg text-label-lg font-bold text-primary">Resume focus session?</p>
+                <p className="mt-xs font-body-sm text-body-sm text-on-surface-variant">
+                  Your timer was saved. {focusClock(focusResumeSecondsLeft)} left on{" "}
+                  <span className="font-bold text-on-surface">{focusResumePrompt.blockName}</span>.
+                </p>
+                <div className="mt-md flex flex-wrap gap-sm">
+                  <button
+                    type="button"
+                    className="rounded-full bg-primary px-md py-xs font-label-md text-label-md font-bold text-on-primary transition-transform active:scale-95"
+                    onClick={() => {
+                      const href = focusResumePrompt.href;
+                      setFocusResumePrompt(null);
+                      if (href) {
+                        window.location.assign(href);
+                        return;
+                      }
+                      setActiveView("sessions");
+                    }}
+                  >
+                    Resume
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full border border-surface-variant bg-surface-container px-md py-xs font-label-md text-label-md text-on-surface transition-colors hover:bg-primary-container"
+                    onClick={() => setFocusResumePrompt(null)}
+                  >
+                    Keep hidden
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
         <FocusMiniTimer onOpen={() => setActiveView("sessions")} />
         {loading ? (
