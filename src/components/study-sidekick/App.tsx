@@ -25,6 +25,7 @@ import FocusMiniTimer from "./components/FocusMiniTimer";
 import {
   FOCUS_TIMER_EVENT,
   type FocusTimerSnapshot,
+  focusTimerResumeHref,
   focusTimerSecondsLeft,
   isFocusTimerSnapshotVisible,
   readFocusTimerSnapshot,
@@ -1414,13 +1415,9 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
                     type="button"
                     className="rounded-full bg-primary px-md py-xs font-label-md text-label-md font-bold text-on-primary transition-transform active:scale-95"
                     onClick={() => {
-                      const href = focusResumePrompt.href;
+                      const href = focusTimerResumeHref(focusResumePrompt);
                       setFocusResumePrompt(null);
-                      if (href) {
-                        window.location.assign(href);
-                        return;
-                      }
-                      setActiveView("sessions");
+                      window.location.assign(href);
                     }}
                   >
                     Resume

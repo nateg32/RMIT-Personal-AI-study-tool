@@ -560,6 +560,8 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     if (typeof window === "undefined") return "/study-sessions";
     const url = new URL("/study-sessions", window.location.origin);
     url.searchParams.set("focus", "1");
+    url.searchParams.set("resume", "1");
+    url.searchParams.set("stage", focusStage === "break" ? "break" : "focus");
     url.searchParams.set("block", String(safeActiveBlockIndex));
 
     if (activeSession) {
@@ -585,7 +587,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     }
 
     return `${url.pathname}${url.search}`;
-  }, [activeSession, duration, plan, safeActiveBlockIndex, selectedAssignment, selectedCustomSession, sessionSource]);
+  }, [activeSession, duration, focusStage, plan, safeActiveBlockIndex, selectedAssignment, selectedCustomSession, sessionSource]);
 
   const publishFocusTimer = useCallback(
     (
@@ -700,10 +702,40 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     const customSessionId = params.get("customSessionId");
     const draftKey = params.get("draftKey");
     const blockIndex = Number(params.get("block") || 0);
+    const shouldResume = params.get("resume") === "1";
+    const requestedStage = params.get("stage");
+    const resumeSnapshot = shouldResume ? readFocusTimerSnapshot() : null;
+    const resumeSecondsLeft = resumeSnapshot ? focusTimerSecondsLeft(resumeSnapshot) : 0;
+    const canResumeSnapshot = Boolean(
+      resumeSnapshot &&
+        isFocusTimerSnapshotVisible(resumeSnapshot) &&
+        (resumeSecondsLeft > 0 || resumeSnapshot.phase === "complete"),
+    );
     const scheduleFocusLaunch = (launch: () => void) => {
       focusLaunchHandledRef.current = true;
       window.history.replaceState(null, "", window.location.pathname);
       window.setTimeout(launch, 0);
+    };
+    const openLaunchStage = (fallbackBlockIndex: number) => {
+      if (canResumeSnapshot && resumeSnapshot) {
+        setActiveBlockIndex(Math.max(0, resumeSnapshot.activeBlockIndex));
+        if (resumeSnapshot.phase === "break" || resumeSnapshot.phase === "complete" || requestedStage === "break") {
+          setBreakMode("breathe");
+          setBreakSecondsLeft(resumeSecondsLeft);
+          setFocusStage("break");
+        } else {
+          setTimerState({
+            key: resumeSnapshot.timerKey,
+            secondsLeft: resumeSecondsLeft,
+            running: Boolean(resumeSnapshot.running && resumeSecondsLeft > 0),
+          });
+          setFocusStage("focus");
+        }
+      } else {
+        setActiveBlockIndex(Math.max(0, fallbackBlockIndex));
+        setFocusStage("brief");
+      }
+      setFocusFullscreen(true);
     };
 
     if (sessionId) {
@@ -717,25 +749,19 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
           setSessionSource("custom");
           setSelectedCustomSessionId(matchedSession.id);
         }
-        setActiveBlockIndex(Math.max(0, blockIndex));
-        setFocusStage("brief");
-        setFocusFullscreen(true);
+        openLaunchStage(blockIndex);
       });
     } else if (assignmentId && assignments.some((assignment) => assignment.id === assignmentId)) {
       scheduleFocusLaunch(() => {
         setSessionSource("canvas");
         onSelectAssignment(assignmentId);
-        setActiveBlockIndex(Math.max(0, blockIndex));
-        setFocusStage("brief");
-        setFocusFullscreen(true);
+        openLaunchStage(blockIndex);
       });
     } else if (customSessionId && customSessions.some((session) => session.id === customSessionId)) {
       scheduleFocusLaunch(() => {
         setSessionSource("custom");
         setSelectedCustomSessionId(customSessionId);
-        setActiveBlockIndex(Math.max(0, blockIndex));
-        setFocusStage("brief");
-        setFocusFullscreen(true);
+        openLaunchStage(blockIndex);
       });
     } else if (draftKey) {
       try {
@@ -749,9 +775,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
           if (payload.assignmentId) onSelectAssignment(payload.assignmentId);
           if (payload.customSessionId) setSelectedCustomSessionId(payload.customSessionId);
           setDuration(payload.duration);
-          setActiveBlockIndex(Math.max(0, payload.activeBlockIndex));
-          setFocusStage("brief");
-          setFocusFullscreen(true);
+          openLaunchStage(payload.activeBlockIndex);
         });
       } catch {
         window.localStorage.removeItem(focusLaunchStorageKey(draftKey));

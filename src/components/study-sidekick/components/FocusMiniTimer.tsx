@@ -5,6 +5,7 @@ import {
   FOCUS_TIMER_EVENT,
   FOCUS_TIMER_STORAGE_KEY,
   type FocusTimerSnapshot,
+  focusTimerResumeHref,
   focusTimerSecondsLeft,
   isFocusTimerSnapshotVisible,
   readFocusTimerSnapshot,
@@ -75,11 +76,8 @@ export default function FocusMiniTimer({ onOpen }: { onOpen?: () => void }) {
   if (!snapshot || !view) return null;
 
   const openFocus = () => {
-    if (snapshot.href) {
-      window.location.assign(snapshot.href);
-      return;
-    }
-    onOpen?.();
+    window.location.assign(focusTimerResumeHref(snapshot));
+    if (!snapshot.href) onOpen?.();
   };
 
   return (

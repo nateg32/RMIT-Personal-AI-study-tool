@@ -99,6 +99,21 @@ export function clearFocusTimerSnapshot() {
   emitFocusTimerChange(null);
 }
 
+export function focusTimerResumeHref(snapshot: FocusTimerSnapshot, origin?: string) {
+  const base = snapshot.href || "/study-sessions";
+  const url = new URL(base, origin || (typeof window === "undefined" ? "http://localhost" : window.location.origin));
+  url.searchParams.set("focus", "1");
+  url.searchParams.set("resume", "1");
+  url.searchParams.set("block", String(snapshot.activeBlockIndex));
+  url.searchParams.set("stage", snapshot.phase === "break" || snapshot.phase === "complete" ? "break" : "focus");
+
+  if (snapshot.sessionId) url.searchParams.set("sessionId", snapshot.sessionId);
+  if (snapshot.assignmentId) url.searchParams.set("assignmentId", snapshot.assignmentId);
+  if (snapshot.customSessionId) url.searchParams.set("customSessionId", snapshot.customSessionId);
+
+  return `${url.pathname}${url.search}`;
+}
+
 export function focusTimerSecondsLeft(snapshot: FocusTimerSnapshot, now = Date.now()) {
   if (snapshot.running && snapshot.endsAt) {
     return Math.max(0, Math.ceil((snapshot.endsAt - now) / 1000));
