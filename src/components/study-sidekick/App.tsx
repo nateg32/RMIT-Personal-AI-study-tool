@@ -137,6 +137,21 @@ const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const OPERATION_STORAGE_KEY = "study-sidekick-active-operation-v1";
 const OPERATION_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const FOCUS_UNLOAD_PROMPT_KEY = "study-sidekick-focus-unload-prompt-v1";
+const PAGE_REFRESH_CACHE_KEY = "study-sidekick-page-refresh-v1";
+const PAGE_REFRESH_FRESH_MS = 2 * 60 * 1000;
+const CANVAS_COURSE_SYNC_CONCURRENCY = 2;
+
+type CanvasSyncCourse = {
+  canvasCourseId: number;
+  name: string;
+  courseCode?: string | null;
+};
+
+type CanvasCourseRefreshSummary = {
+  assignments: number;
+  changes?: Array<{ label: string }>;
+  warnings?: string[];
+};
 
 type ChatAgentEvent = {
   type: "study_session_created" | "dashboard_item_hidden" | "dashboard_scope_reset";
@@ -168,6 +183,83 @@ function focusClock(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
   const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${rest}`;
+}
+
+function readPageRefreshCache() {
+  if (typeof window === "undefined") return {};
+  try {
+    const stored = window.localStorage.getItem(PAGE_REFRESH_CACHE_KEY);
+    if (!stored) return {};
+    const parsed = JSON.parse(stored) as Record<string, number>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    window.localStorage.removeItem(PAGE_REFRESH_CACHE_KEY);
+    return {};
+  }
+}
+
+function writePageRefreshCache(cache: Record<string, number>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PAGE_REFRESH_CACHE_KEY, JSON.stringify(cache));
+}
+
+function pageRefreshCacheKey(syncScope: "assignments" | "announcements", canvasCourseId: number) {
+  return `${syncScope}:${canvasCourseId}`;
+}
+
+async function runCourseRefreshQueue(input: {
+  courses: CanvasSyncCourse[];
+  includeResources?: boolean;
+  syncScope: "all" | "assignments" | "announcements";
+  onProgress: (message: string) => void;
+}) {
+  const changes: Array<{ label: string }> = [];
+  const warnings: string[] = [];
+  let assignmentCount = 0;
+  let successfulCourses = 0;
+  let cursor = 0;
+  let completed = 0;
+
+  const workerCount = Math.min(CANVAS_COURSE_SYNC_CONCURRENCY, Math.max(1, input.courses.length));
+
+  const worker = async () => {
+    while (cursor < input.courses.length) {
+      const courseIndex = cursor;
+      cursor += 1;
+      const course = input.courses[courseIndex];
+      input.onProgress(`Refreshing ${completed}/${input.courses.length} courses. Checking ${course.name}...`);
+
+      try {
+        const courseSummary = await apiJson<CanvasCourseRefreshSummary>("/api/canvas/sync/course", {
+          method: "POST",
+          body: JSON.stringify({
+            canvasCourseId: course.canvasCourseId,
+            includeResources: input.includeResources || false,
+            syncScope: input.syncScope,
+          }),
+        });
+        successfulCourses += 1;
+        assignmentCount += courseSummary.assignments || 0;
+        changes.push(...(courseSummary.changes || []));
+        warnings.push(...(courseSummary.warnings || []));
+      } catch (error) {
+        warnings.push(`${course.name}: ${error instanceof Error ? error.message : "course refresh failed"}`);
+      } finally {
+        completed += 1;
+        input.onProgress(`Refreshing ${completed}/${input.courses.length} courses...`);
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return {
+    successfulCourses,
+    assignmentCount,
+    changes,
+    warnings,
+  };
 }
 
 function operationId() {
@@ -460,37 +552,17 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     setActionMessage("Preparing Canvas sync and checking your visible courses...");
     try {
       const prepared = await apiJson<{
-        courses: Array<{ canvasCourseId: number; name: string; courseCode?: string | null }>;
+        courses: CanvasSyncCourse[];
         skippedCourses?: number;
       }>("/api/canvas/sync", { method: "POST" });
 
       const courseCount = prepared.courses.length;
-      const changes: Array<{ label: string }> = [];
-      const warnings: string[] = [];
-      let successfulCourses = 0;
-
-      for (let index = 0; index < courseCount; index += 1) {
-        const course = prepared.courses[index];
-        setActionMessage(`Syncing ${index + 1}/${courseCount}: ${course.name}...`);
-        try {
-          const courseSummary = await apiJson<{
-            assignments: number;
-            changes?: Array<{ label: string }>;
-            warnings?: string[];
-          }>("/api/canvas/sync/course", {
-            method: "POST",
-            body: JSON.stringify({
-              canvasCourseId: course.canvasCourseId,
-              includeResources: false,
-            }),
-          });
-          successfulCourses += 1;
-          changes.push(...(courseSummary.changes || []));
-          warnings.push(...(courseSummary.warnings || []));
-        } catch (error) {
-          warnings.push(`${course.name}: ${error instanceof Error ? error.message : "course sync failed"}`);
-        }
-      }
+      const { successfulCourses, changes, warnings } = await runCourseRefreshQueue({
+        courses: prepared.courses,
+        includeResources: false,
+        syncScope: "all",
+        onProgress: setActionMessage,
+      });
 
       const syncError =
         courseCount > 0 && successfulCourses === 0
@@ -535,43 +607,56 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       if (!operation) return;
 
       setIsSyncing(true);
-      setActionMessage(`Preparing ${itemLabel} refresh for your visible Canvas courses...`);
+      setActionMessage(`Preparing ${itemLabel} refresh from saved courses...`);
       try {
-        const prepared = await apiJson<{
-          courses: Array<{ canvasCourseId: number; name: string; courseCode?: string | null }>;
-          skippedCourses?: number;
-        }>("/api/canvas/sync", { method: "POST" });
+        let preparedCourses: CanvasSyncCourse[] = courses
+          .filter((course) => course.canvasCourseId)
+          .map((course) => ({
+            canvasCourseId: course.canvasCourseId as number,
+            name: course.name,
+            courseCode: course.courseCode,
+          }));
 
-        const courseCount = prepared.courses.length;
-        const changes: Array<{ label: string }> = [];
-        const warnings: string[] = [];
-        let successfulCourses = 0;
-        let assignmentCount = 0;
-
-        for (let index = 0; index < courseCount; index += 1) {
-          const course = prepared.courses[index];
-          setActionMessage(`Refreshing ${itemLabel} ${index + 1}/${courseCount}: ${course.name}...`);
-          try {
-            const courseSummary = await apiJson<{
-              assignments: number;
-              changes?: Array<{ label: string }>;
-              warnings?: string[];
-            }>("/api/canvas/sync/course", {
-              method: "POST",
-              body: JSON.stringify({
-                canvasCourseId: course.canvasCourseId,
-                includeResources: false,
-                syncScope,
-              }),
-            });
-            successfulCourses += 1;
-            assignmentCount += courseSummary.assignments || 0;
-            changes.push(...(courseSummary.changes || []));
-            warnings.push(...(courseSummary.warnings || []));
-          } catch (error) {
-            warnings.push(`${course.name}: ${error instanceof Error ? error.message : "course refresh failed"}`);
-          }
+        if (!preparedCourses.length) {
+          setActionMessage("No saved courses yet, checking Canvas once for your course list...");
+          const prepared = await apiJson<{
+            courses: CanvasSyncCourse[];
+          }>("/api/canvas/sync", { method: "POST" });
+          preparedCourses = prepared.courses;
         }
+
+        const refreshCache = readPageRefreshCache();
+        const now = Date.now();
+        const staleCourses = preparedCourses.filter((course) => {
+          const lastRefreshedAt = refreshCache[pageRefreshCacheKey(syncScope, course.canvasCourseId)] || 0;
+          return now - lastRefreshedAt > PAGE_REFRESH_FRESH_MS;
+        });
+        const freshSkipped = preparedCourses.length - staleCourses.length;
+        const courseCount = staleCourses.length;
+
+        if (!courseCount) {
+          await refreshData();
+          setActionMessage(`${label} is already fresh. Try again in a minute if Canvas just changed.`);
+          return;
+        }
+
+        if (freshSkipped > 0) {
+          setActionMessage(`Skipping ${freshSkipped} recently refreshed courses, checking ${courseCount} stale courses...`);
+        }
+
+        const { successfulCourses, assignmentCount, changes, warnings } = await runCourseRefreshQueue({
+          courses: staleCourses,
+          includeResources: false,
+          syncScope,
+          onProgress: setActionMessage,
+        });
+
+        const finishedAt = Date.now();
+        for (const course of staleCourses) {
+          if (warnings.some((warning) => warning.startsWith(`${course.name}:`))) continue;
+          refreshCache[pageRefreshCacheKey(syncScope, course.canvasCourseId)] = finishedAt;
+        }
+        writePageRefreshCache(refreshCache);
 
         const syncError =
           courseCount > 0 && successfulCourses === 0
@@ -596,8 +681,9 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         } else {
           const refreshedText = isAssignments ? `${assignmentCount} assignments checked` : `${changes.length} changes detected`;
           const warningText = warnings.length ? ` ${warnings.length} course warnings were kept.` : "";
+          const skippedText = freshSkipped ? ` ${freshSkipped} fresh courses skipped.` : "";
           setActionMessage(
-            `${label} complete: ${successfulCourses}/${courseCount} courses refreshed, ${refreshedText}.${warningText}`,
+            `${label} complete: ${successfulCourses}/${courseCount} stale courses refreshed, ${refreshedText}.${skippedText}${warningText}`,
           );
         }
       } catch (error) {
@@ -607,7 +693,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         endOperation(operation);
       }
     },
-    [beginOperation, endOperation, refreshData],
+    [beginOperation, courses, endOperation, refreshData],
   );
 
   useEffect(() => {
