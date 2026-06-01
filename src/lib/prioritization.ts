@@ -9,10 +9,16 @@ export type Urgency = {
   estimatedTime: string;
 };
 
+export function hasCanvasGrade(assignment: CanvasAssignmentSummary) {
+  const grade = typeof assignment.grade === "string" ? assignment.grade.trim() : "";
+  return assignment.score !== null && assignment.score !== undefined || Boolean(grade && grade !== "-");
+}
+
 export function isSubmitted(assignment: CanvasAssignmentSummary) {
   const state = assignment.workflowState?.toLowerCase();
   return Boolean(
     assignment.submittedAt ||
+      hasCanvasGrade(assignment) ||
       state === "submitted" ||
       state === "graded" ||
       state === "complete" ||

@@ -60,8 +60,11 @@ function stableHash(value: unknown) {
 
 function canvasSubmissionIsSubmitted(submission?: CanvasSubmission | null) {
   const state = submission?.workflow_state?.toLowerCase();
+  const grade = typeof submission?.grade === "string" ? submission.grade.trim() : "";
   return Boolean(
     submission?.submitted_at ||
+      (submission?.score !== null && submission?.score !== undefined) ||
+      (grade && grade !== "-") ||
       state === "submitted" ||
       state === "graded" ||
       state === "complete" ||
@@ -356,6 +359,11 @@ export async function syncCanvasCourseForUser(
       submission_types: assignmentDetails.submission_types,
       workflow_state: assignmentDetails.submission?.workflow_state,
       submitted_at: assignmentDetails.submission?.submitted_at,
+      score: assignmentDetails.submission?.score,
+      grade: assignmentDetails.submission?.grade,
+      missing: assignmentDetails.submission?.missing,
+      late: assignmentDetails.submission?.late,
+      attempt: assignmentDetails.submission?.attempt,
       rubric_summary: rubric.summary,
       all_dates: assignmentDetails.all_dates,
       overrides: assignmentDetails.overrides,

@@ -277,6 +277,8 @@ export async function getAssignmentContextForUser(user: User, assignmentId: stri
     htmlUrl: assignment.htmlUrl,
     submittedAt: assignment.submission?.submittedAt,
     workflowState: assignment.submission?.workflowState,
+    score: assignment.submission?.score,
+    grade: assignment.submission?.grade,
     missing: assignment.submission?.missing,
     late: assignment.submission?.late,
     submissionTypes: stringArray(assignment.submissionTypes),
@@ -382,6 +384,8 @@ export async function getChatAssignmentContextsForUser(user: User, message: stri
         submissionTypes: stringArray(assignment.submissionTypes),
         submittedAt: assignment.submission?.submittedAt,
         workflowState: assignment.submission?.workflowState,
+        score: assignment.submission?.score,
+        grade: assignment.submission?.grade,
         missing: assignment.submission?.missing,
         late: assignment.submission?.late,
       });

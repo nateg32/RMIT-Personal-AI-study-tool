@@ -35,6 +35,8 @@ function assignmentSummary(assignment: {
   submission: {
     submittedAt: Date | null;
     workflowState: string | null;
+    score: number | null;
+    grade: string | null;
     missing: boolean;
     late: boolean;
   } | null;
@@ -55,6 +57,8 @@ function assignmentSummary(assignment: {
     submissionTypes: stringArray(assignment.submissionTypes),
     submittedAt: assignment.submission?.submittedAt,
     workflowState: assignment.submission?.workflowState,
+    score: assignment.submission?.score,
+    grade: assignment.submission?.grade,
     missing: assignment.submission?.missing,
     late: assignment.submission?.late,
   };

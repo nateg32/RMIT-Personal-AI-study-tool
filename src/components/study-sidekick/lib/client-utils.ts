@@ -41,6 +41,7 @@ export function isSubmitted(assignment: AssignmentSummary) {
   const state = assignment.workflowState?.toLowerCase();
   return (
     Boolean(assignment.submittedAt) ||
+    hasCanvasGrade(assignment) ||
     state === "submitted" ||
     state === "graded" ||
     state === "complete" ||
@@ -49,6 +50,11 @@ export function isSubmitted(assignment: AssignmentSummary) {
     state === "manual_complete" ||
     state === "done"
   );
+}
+
+export function hasCanvasGrade(assignment: AssignmentSummary) {
+  const grade = typeof assignment.grade === "string" ? assignment.grade.trim() : "";
+  return assignment.score !== null && assignment.score !== undefined || Boolean(grade && grade !== "-");
 }
 
 export function riskForAssignment(assignment: AssignmentSummary): RiskLevel {
@@ -75,6 +81,7 @@ export function estimateEffort(assignment: AssignmentSummary) {
 
 export function statusLabel(assignment: AssignmentSummary) {
   if (assignment.workflowState?.toLowerCase() === "submitted_elsewhere") return "Done elsewhere";
+  if (hasCanvasGrade(assignment) || assignment.workflowState?.toLowerCase() === "graded") return "Graded";
   if (isSubmitted(assignment)) return "Submitted";
   if (assignment.late) return "Late";
   if (assignment.missing) return "Missing";

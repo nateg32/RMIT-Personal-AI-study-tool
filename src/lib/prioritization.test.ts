@@ -15,6 +15,8 @@ describe("prioritization", () => {
     expect(getUrgency({ ...base, workflowState: "submitted" }).label).toBe("low");
     expect(isSubmitted({ ...base, workflowState: "submitted_elsewhere" })).toBe(true);
     expect(getUrgency({ ...base, workflowState: "submitted_elsewhere" }).label).toBe("low");
+    expect(isSubmitted({ ...base, workflowState: "unsubmitted", score: 4, grade: "4 / 5" })).toBe(true);
+    expect(getUrgency({ ...base, workflowState: "unsubmitted", dueAt: "2026-05-31T13:59:00.000Z", score: 5 }).label).toBe("low");
   });
 
   it("marks unsubmitted work due within 24 hours as critical", () => {

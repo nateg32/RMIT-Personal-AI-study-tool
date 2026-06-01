@@ -81,6 +81,8 @@ export type CanvasAssignmentSummary = {
   dueStatus?: "overdue" | "due_today" | "due_this_week" | "upcoming" | "undated" | "submitted";
   submittedAt?: Date | string | null;
   workflowState?: string | null;
+  score?: number | null;
+  grade?: string | null;
   missing?: boolean | null;
   late?: boolean | null;
 };

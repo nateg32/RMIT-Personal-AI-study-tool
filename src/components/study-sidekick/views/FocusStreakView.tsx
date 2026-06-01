@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { AssignmentSummary, DashboardSummary, StudySessionRecord, StudySidekickActions } from "../types";
+import { isSubmitted } from "../lib/client-utils";
 import { buildFocusStats } from "../lib/streak";
 
 type FocusStreakViewProps = {
@@ -90,7 +91,7 @@ export default function FocusStreakView({
 }: FocusStreakViewProps) {
   const stats = useMemo(() => buildFocusStats(sessions, dashboard.timezone), [dashboard.timezone, sessions]);
   const progressPercent = completionPercent(sessions);
-  const nextAssignment = assignments.find((assignment) => !assignment.submittedAt) || assignments[0] || null;
+  const nextAssignment = assignments.find((assignment) => !isSubmitted(assignment)) || assignments[0] || null;
   const earnedBadges = stats.badges.filter((badge) => badge.earned).length;
   const streakLabel =
     stats.protectedStreak === 1 ? "1 day" : `${stats.protectedStreak} days`;

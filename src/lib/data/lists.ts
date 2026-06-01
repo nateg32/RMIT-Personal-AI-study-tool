@@ -52,6 +52,8 @@ export async function getAssignmentsForUser(user: User): Promise<CanvasAssignmen
           submissionTypes: stringArray(assignment.submissionTypes),
           submittedAt: assignment.submission?.submittedAt,
           workflowState: assignment.submission?.workflowState,
+          score: assignment.submission?.score,
+          grade: assignment.submission?.grade,
           missing: assignment.submission?.missing,
           late: assignment.submission?.late,
         }),
