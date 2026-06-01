@@ -10,6 +10,7 @@ export const maxDuration = 60;
 const bodySchema = z.object({
   canvasCourseId: z.number().int().positive(),
   includeResources: z.boolean().optional().default(false),
+  syncScope: z.enum(["all", "assignments", "announcements"]).optional().default("all"),
 });
 
 export async function POST(request: Request) {
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
     const body = await parseJson(request, bodySchema);
     const summary = await syncCanvasCourseForUser(user, body.canvasCourseId, {
       includeResources: body.includeResources,
+      syncScope: body.syncScope,
     });
     await auditLog({
       userId: user.id,
@@ -29,6 +31,7 @@ export async function POST(request: Request) {
       metadata: {
         course: summary.course,
         assignments: summary.assignments,
+        syncScope: body.syncScope,
         changeCount: summary.changes.length,
         warnings: summary.warnings,
       },

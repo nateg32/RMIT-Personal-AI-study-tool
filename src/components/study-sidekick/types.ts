@@ -278,6 +278,8 @@ export type StudySidekickActions = {
   onNavigate: (view: ViewType) => void;
   onGenerateBrief: () => void;
   onSyncCanvas: () => void;
+  onSyncAssignments: () => void;
+  onSyncAnnouncements: () => void;
   onStartSession: () => void;
   onOpenAnnouncements: () => void;
   onOpenSettings: () => void;
@@ -292,6 +294,8 @@ export type StudySidekickActions = {
   actionMessage?: string | null;
   isGeneratingBrief?: boolean;
   isSyncing?: boolean;
+  isSyncingAssignments?: boolean;
+  isSyncingAnnouncements?: boolean;
   isBusy?: boolean;
   disabledReason?: string | null;
   activeOperation?: ActiveOperation | null;

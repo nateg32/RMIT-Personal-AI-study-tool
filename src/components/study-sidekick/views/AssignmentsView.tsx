@@ -73,11 +73,25 @@ export default function AssignmentsView({
         actions={actions}
       />
 
-      <div className="max-w-7xl mx-auto w-full mb-md">
-        <h1 className="font-display-lg text-display-lg text-primary">Assignments & Tasks</h1>
-        <p className="font-body-lg text-on-surface-variant mt-sm">
-          Live Canvas assignments with submission status, due dates, rubric hints, and study-session actions.
-        </p>
+      <div className="max-w-7xl mx-auto mb-md flex w-full flex-col gap-md md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="font-display-lg text-display-lg text-primary">Assignments & Tasks</h1>
+          <p className="font-body-lg text-on-surface-variant mt-sm">
+            Live Canvas assignments with submission status, due dates, rubric hints, and study-session actions.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-xs self-start rounded-full border-2 border-surface-variant bg-surface-container px-lg py-sm font-label-md text-label-md text-on-surface transition-all duration-200 hover:border-primary-fixed hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60 md:self-auto"
+          onClick={actions.onSyncAssignments}
+          disabled={actionsDisabled}
+          title={actions.disabledReason || "Refresh assignments and submission status only"}
+        >
+          <span className={`material-symbols-outlined text-[18px] ${actions.isSyncingAssignments ? "animate-spin" : ""}`}>
+            sync
+          </span>
+          {actions.isSyncingAssignments ? "Refreshing..." : "Refresh assignments"}
+        </button>
       </div>
 
       <section className="flex flex-wrap items-center gap-sm mb-xl max-w-7xl mx-auto w-full">

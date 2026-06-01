@@ -459,6 +459,91 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     }
   }, [beginOperation, endOperation, refreshData]);
 
+  const syncCanvasPage = useCallback(
+    async (syncScope: "assignments" | "announcements") => {
+      const isAssignments = syncScope === "assignments";
+      const view = isAssignments ? "assignments" : "announcements";
+      const label = isAssignments ? "Assignments refresh" : "Announcements refresh";
+      const itemLabel = isAssignments ? "assignments and submission status" : "announcements";
+      const operation = beginOperation({ type: "sync", label, view });
+      if (!operation) return;
+
+      setIsSyncing(true);
+      setActionMessage(`Preparing ${itemLabel} refresh for your visible Canvas courses...`);
+      try {
+        const prepared = await apiJson<{
+          courses: Array<{ canvasCourseId: number; name: string; courseCode?: string | null }>;
+          skippedCourses?: number;
+        }>("/api/canvas/sync", { method: "POST" });
+
+        const courseCount = prepared.courses.length;
+        const changes: Array<{ label: string }> = [];
+        const warnings: string[] = [];
+        let successfulCourses = 0;
+        let assignmentCount = 0;
+
+        for (let index = 0; index < courseCount; index += 1) {
+          const course = prepared.courses[index];
+          setActionMessage(`Refreshing ${itemLabel} ${index + 1}/${courseCount}: ${course.name}...`);
+          try {
+            const courseSummary = await apiJson<{
+              assignments: number;
+              changes?: Array<{ label: string }>;
+              warnings?: string[];
+            }>("/api/canvas/sync/course", {
+              method: "POST",
+              body: JSON.stringify({
+                canvasCourseId: course.canvasCourseId,
+                includeResources: false,
+                syncScope,
+              }),
+            });
+            successfulCourses += 1;
+            assignmentCount += courseSummary.assignments || 0;
+            changes.push(...(courseSummary.changes || []));
+            warnings.push(...(courseSummary.warnings || []));
+          } catch (error) {
+            warnings.push(`${course.name}: ${error instanceof Error ? error.message : "course refresh failed"}`);
+          }
+        }
+
+        const syncError =
+          courseCount > 0 && successfulCourses === 0
+            ? warnings[0] || `No Canvas courses refreshed for ${itemLabel}.`
+            : null;
+
+        await apiJson("/api/canvas/sync/finish", {
+          method: "POST",
+          body: JSON.stringify({
+            syncError,
+            successfulCourses,
+            totalCourses: courseCount,
+            changeCount: changes.length,
+            warnings: warnings.slice(0, 10),
+          }),
+        });
+
+        await refreshData();
+        if (syncError) {
+          const detail = warnings[0] ? ` ${warnings[0]}` : "";
+          setActionMessage(`${label} could not finish any courses.${detail}`);
+        } else {
+          const refreshedText = isAssignments ? `${assignmentCount} assignments checked` : `${changes.length} changes detected`;
+          const warningText = warnings.length ? ` ${warnings.length} course warnings were kept.` : "";
+          setActionMessage(
+            `${label} complete: ${successfulCourses}/${courseCount} courses refreshed, ${refreshedText}.${warningText}`,
+          );
+        }
+      } catch (error) {
+        setActionMessage(error instanceof Error ? error.message : `${label} failed.`);
+      } finally {
+        setIsSyncing(false);
+        endOperation(operation);
+      }
+    },
+    [beginOperation, endOperation, refreshData],
+  );
+
   useEffect(() => {
     if (loading || isSyncing || activeOperation || autoSyncStartedRef.current) return;
     if (!dashboard.canvasConfigured || dashboard.syncStatus === "syncing") return;
@@ -1067,6 +1152,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       onNavigate: setActiveView,
       onGenerateBrief: generateBrief,
       onSyncCanvas: syncCanvas,
+      onSyncAssignments: () => void syncCanvasPage("assignments"),
+      onSyncAnnouncements: () => void syncCanvasPage("announcements"),
       onStartSession: startSession,
       onOpenAnnouncements: () => setActiveView("announcements"),
       onOpenSettings: () => setActiveView("settings"),
@@ -1075,6 +1162,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       actionMessage,
       isGeneratingBrief,
       isSyncing,
+      isSyncingAssignments: activeOperation?.type === "sync" && activeOperation.view === "assignments",
+      isSyncingAnnouncements: activeOperation?.type === "sync" && activeOperation.view === "announcements",
       isBusy: Boolean(activeOperation),
       disabledReason,
       activeOperation,
@@ -1089,6 +1178,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
       openChat,
       startSession,
       syncCanvas,
+      syncCanvasPage,
       uploadMaterial,
     ],
   );

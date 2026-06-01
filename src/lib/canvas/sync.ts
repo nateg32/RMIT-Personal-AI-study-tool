@@ -31,6 +31,7 @@ type CanvasSyncOptions = {
   includeResources?: boolean;
   requestTimeoutMs?: number;
   timeBudgetMs?: number;
+  syncScope?: "all" | "assignments" | "announcements";
 };
 
 export type PreparedCanvasCourse = {
@@ -42,7 +43,7 @@ export type PreparedCanvasCourse = {
 
 export type CanvasCourseSyncSummary = {
   ok: boolean;
-  mode: "course_skipped" | "course_core" | "course_full";
+  mode: "course_skipped" | "course_core" | "course_full" | "course_assignments" | "course_announcements";
   course: { id: string; canvasCourseId: number; name: string };
   assignments: number;
   changes: ChangeEvent[];
@@ -256,6 +257,11 @@ export async function syncCanvasCourseForUser(
   const seenAnnouncements = new Set<string>();
   const budgetWarnings = new Set<string>();
   let assignmentDetailFetches = 0;
+  let assignmentCount = 0;
+  const syncScope = options.syncScope || "all";
+  const shouldSyncAssignments = syncScope !== "announcements";
+  const shouldSyncAnnouncements = syncScope !== "assignments";
+  const shouldSyncResources = syncScope === "all" && options.includeResources;
   const deadlineAt = Date.now() + (options.timeBudgetMs || COURSE_SYNC_TIME_BUDGET_MS);
 
   const course = await db.course.findUnique({
@@ -333,124 +339,127 @@ export async function syncCanvasCourseForUser(
     });
   };
 
-  const assignments = await client.getAssignmentsWithSubmissions(canvasCourseId);
+  if (shouldSyncAssignments) {
+    const assignments = await client.getAssignmentsWithSubmissions(canvasCourseId);
+    assignmentCount = assignments.length;
 
-  for (const assignment of assignments) {
-    if (!isCanvasAssignmentVisible(canvasCourseId, assignment.id, preferences)) continue;
+    for (const assignment of assignments) {
+      if (!isCanvasAssignmentVisible(canvasCourseId, assignment.id, preferences)) continue;
 
-    const shouldFetchAssignmentDetails =
-      options.includeResources &&
-      assignmentDetailFetches < MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC &&
-      (!assignment.description || !assignment.rubric) &&
-      hasTimeFor("extra assignment details", 1_500);
-    if (shouldFetchAssignmentDetails) assignmentDetailFetches += 1;
+      const shouldFetchAssignmentDetails =
+        shouldSyncResources &&
+        assignmentDetailFetches < MAX_ASSIGNMENT_DETAIL_FETCHES_PER_SYNC &&
+        (!assignment.description || !assignment.rubric) &&
+        hasTimeFor("extra assignment details", 1_500);
+      if (shouldFetchAssignmentDetails) assignmentDetailFetches += 1;
 
-    const assignmentDetails = shouldFetchAssignmentDetails
-      ? await client.getAssignmentDetails(canvasCourseId, assignment.id).catch(() => assignment)
-      : assignment;
-    const rubric = summariseRubric(
-      assignmentDetails.rubric as Array<Record<string, unknown>> | null | undefined,
-    );
-    const snapshotValue = {
-      name: assignmentDetails.name,
-      due_at: assignmentDetails.due_at,
-      updated_at: assignmentDetails.updated_at,
-      points_possible: assignmentDetails.points_possible,
-      submission_types: assignmentDetails.submission_types,
-      workflow_state: assignmentDetails.submission?.workflow_state,
-      submitted_at: assignmentDetails.submission?.submitted_at,
-      score: assignmentDetails.submission?.score,
-      grade: assignmentDetails.submission?.grade,
-      missing: assignmentDetails.submission?.missing,
-      late: assignmentDetails.submission?.late,
-      attempt: assignmentDetails.submission?.attempt,
-      rubric_summary: rubric.summary,
-      all_dates: assignmentDetails.all_dates,
-      overrides: assignmentDetails.overrides,
-      score_statistics: assignmentDetails.score_statistics,
-    };
-    const change = await snapshot(
-      user.id,
-      "assignment",
-      `${canvasCourseId}:${assignment.id}`,
-      snapshotValue,
-      assignmentDetails.name,
-    );
-    if (change) changes.push(change);
+      const assignmentDetails = shouldFetchAssignmentDetails
+        ? await client.getAssignmentDetails(canvasCourseId, assignment.id).catch(() => assignment)
+        : assignment;
+      const rubric = summariseRubric(
+        assignmentDetails.rubric as Array<Record<string, unknown>> | null | undefined,
+      );
+      const snapshotValue = {
+        name: assignmentDetails.name,
+        due_at: assignmentDetails.due_at,
+        updated_at: assignmentDetails.updated_at,
+        points_possible: assignmentDetails.points_possible,
+        submission_types: assignmentDetails.submission_types,
+        workflow_state: assignmentDetails.submission?.workflow_state,
+        submitted_at: assignmentDetails.submission?.submitted_at,
+        score: assignmentDetails.submission?.score,
+        grade: assignmentDetails.submission?.grade,
+        missing: assignmentDetails.submission?.missing,
+        late: assignmentDetails.submission?.late,
+        attempt: assignmentDetails.submission?.attempt,
+        rubric_summary: rubric.summary,
+        all_dates: assignmentDetails.all_dates,
+        overrides: assignmentDetails.overrides,
+        score_statistics: assignmentDetails.score_statistics,
+      };
+      const change = await snapshot(
+        user.id,
+        "assignment",
+        `${canvasCourseId}:${assignment.id}`,
+        snapshotValue,
+        assignmentDetails.name,
+      );
+      if (change) changes.push(change);
 
-    const savedAssignment = await db.assignment.upsert({
-      where: {
-        courseId_canvasAssignmentId: {
+      const savedAssignment = await db.assignment.upsert({
+        where: {
+          courseId_canvasAssignmentId: {
+            courseId: course.id,
+            canvasAssignmentId: assignment.id,
+          },
+        },
+        create: {
+          userId: user.id,
           courseId: course.id,
           canvasAssignmentId: assignment.id,
-        },
-      },
-      create: {
-        userId: user.id,
-        courseId: course.id,
-        canvasAssignmentId: assignment.id,
-        name: assignmentDetails.name,
-        description: stripCanvasHtml(assignmentDetails.description),
-        dueAt: parseDate(assignmentDetails.due_at),
-        lockAt: parseDate(assignmentDetails.lock_at),
-        pointsPossible: assignmentDetails.points_possible,
-        htmlUrl: assignmentDetails.html_url,
-        submissionTypes: assignmentDetails.submission_types || [],
-        rubric: assignmentDetails.rubric ? (assignmentDetails.rubric as Prisma.InputJsonValue) : Prisma.JsonNull,
-        rubricSummary: rubric.summary,
-        createdAtCanvas: parseDate(assignmentDetails.created_at),
-        updatedAtCanvas: parseDate(assignmentDetails.updated_at),
-      },
-      update: {
-        name: assignmentDetails.name,
-        description: stripCanvasHtml(assignmentDetails.description),
-        dueAt: parseDate(assignmentDetails.due_at),
-        lockAt: parseDate(assignmentDetails.lock_at),
-        pointsPossible: assignmentDetails.points_possible,
-        htmlUrl: assignmentDetails.html_url,
-        submissionTypes: assignmentDetails.submission_types || [],
-        rubric: assignmentDetails.rubric ? (assignmentDetails.rubric as Prisma.InputJsonValue) : Prisma.JsonNull,
-        rubricSummary: rubric.summary,
-        updatedAtCanvas: parseDate(assignmentDetails.updated_at),
-      },
-    });
-
-    if (assignmentDetails.submission) {
-      const existingSubmission = await db.submission.findUnique({
-        where: { assignmentId: savedAssignment.id },
-      });
-      const preserveManualStatus =
-        existingSubmission?.workflowState === "submitted_elsewhere" &&
-        !canvasSubmissionIsSubmitted(assignmentDetails.submission);
-
-      if (preserveManualStatus) continue;
-
-      await db.submission.upsert({
-        where: { assignmentId: savedAssignment.id },
-        create: {
-          assignmentId: savedAssignment.id,
-          submittedAt: parseDate(assignmentDetails.submission.submitted_at),
-          workflowState: assignmentDetails.submission.workflow_state,
-          score: assignmentDetails.submission.score,
-          grade: assignmentDetails.submission.grade,
-          late: assignmentDetails.submission.late || false,
-          missing: assignmentDetails.submission.missing || false,
-          attempt: assignmentDetails.submission.attempt,
+          name: assignmentDetails.name,
+          description: stripCanvasHtml(assignmentDetails.description),
+          dueAt: parseDate(assignmentDetails.due_at),
+          lockAt: parseDate(assignmentDetails.lock_at),
+          pointsPossible: assignmentDetails.points_possible,
+          htmlUrl: assignmentDetails.html_url,
+          submissionTypes: assignmentDetails.submission_types || [],
+          rubric: assignmentDetails.rubric ? (assignmentDetails.rubric as Prisma.InputJsonValue) : Prisma.JsonNull,
+          rubricSummary: rubric.summary,
+          createdAtCanvas: parseDate(assignmentDetails.created_at),
+          updatedAtCanvas: parseDate(assignmentDetails.updated_at),
         },
         update: {
-          submittedAt: parseDate(assignmentDetails.submission.submitted_at),
-          workflowState: assignmentDetails.submission.workflow_state,
-          score: assignmentDetails.submission.score,
-          grade: assignmentDetails.submission.grade,
-          late: assignmentDetails.submission.late || false,
-          missing: assignmentDetails.submission.missing || false,
-          attempt: assignmentDetails.submission.attempt,
+          name: assignmentDetails.name,
+          description: stripCanvasHtml(assignmentDetails.description),
+          dueAt: parseDate(assignmentDetails.due_at),
+          lockAt: parseDate(assignmentDetails.lock_at),
+          pointsPossible: assignmentDetails.points_possible,
+          htmlUrl: assignmentDetails.html_url,
+          submissionTypes: assignmentDetails.submission_types || [],
+          rubric: assignmentDetails.rubric ? (assignmentDetails.rubric as Prisma.InputJsonValue) : Prisma.JsonNull,
+          rubricSummary: rubric.summary,
+          updatedAtCanvas: parseDate(assignmentDetails.updated_at),
         },
       });
+
+      if (assignmentDetails.submission) {
+        const existingSubmission = await db.submission.findUnique({
+          where: { assignmentId: savedAssignment.id },
+        });
+        const preserveManualStatus =
+          existingSubmission?.workflowState === "submitted_elsewhere" &&
+          !canvasSubmissionIsSubmitted(assignmentDetails.submission);
+
+        if (preserveManualStatus) continue;
+
+        await db.submission.upsert({
+          where: { assignmentId: savedAssignment.id },
+          create: {
+            assignmentId: savedAssignment.id,
+            submittedAt: parseDate(assignmentDetails.submission.submitted_at),
+            workflowState: assignmentDetails.submission.workflow_state,
+            score: assignmentDetails.submission.score,
+            grade: assignmentDetails.submission.grade,
+            late: assignmentDetails.submission.late || false,
+            missing: assignmentDetails.submission.missing || false,
+            attempt: assignmentDetails.submission.attempt,
+          },
+          update: {
+            submittedAt: parseDate(assignmentDetails.submission.submitted_at),
+            workflowState: assignmentDetails.submission.workflow_state,
+            score: assignmentDetails.submission.score,
+            grade: assignmentDetails.submission.grade,
+            late: assignmentDetails.submission.late || false,
+            missing: assignmentDetails.submission.missing || false,
+            attempt: assignmentDetails.submission.attempt,
+          },
+        });
+      }
     }
   }
 
-  if (hasTimeFor("announcements", 5_750)) {
+  if (shouldSyncAnnouncements && hasTimeFor("announcements", 5_750)) {
     const courseAnnouncements = await client.getCourseAnnouncements(canvasCourseId).catch((error) => {
       warnings.push(
         `${course.name}: announcements failed - ${
@@ -464,13 +473,13 @@ export async function syncCanvasCourseForUser(
     }
   }
 
-  if (options.includeResources) {
+  if (shouldSyncResources) {
     if (!hasTimeFor("files", 5_750)) {
       return {
         ok: true,
         mode: "course_core",
         course: { id: course.id, canvasCourseId: course.canvasCourseId, name: course.name },
-        assignments: assignments.length,
+        assignments: assignmentCount,
         changes,
         warnings,
         syncedAt: new Date().toISOString(),
@@ -589,9 +598,16 @@ export async function syncCanvasCourseForUser(
 
   return {
     ok: true,
-    mode: options.includeResources ? "course_full" : "course_core",
+    mode:
+      syncScope === "assignments"
+        ? "course_assignments"
+        : syncScope === "announcements"
+          ? "course_announcements"
+          : options.includeResources
+            ? "course_full"
+            : "course_core",
     course: { id: course.id, canvasCourseId: course.canvasCourseId, name: course.name },
-    assignments: assignments.length,
+    assignments: assignmentCount,
     changes,
     warnings,
     syncedAt: new Date().toISOString(),

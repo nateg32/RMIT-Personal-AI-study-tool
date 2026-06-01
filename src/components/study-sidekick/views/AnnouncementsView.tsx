@@ -18,6 +18,7 @@ function openCanvas(url?: string | null) {
 export default function AnnouncementsView({ announcements, courses, actions }: AnnouncementsViewProps) {
   const [search, setSearch] = useState("");
   const [course, setCourse] = useState("all");
+  const actionsDisabled = Boolean(actions.isBusy);
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
     return announcements.filter((announcement) => {
@@ -36,11 +37,25 @@ export default function AnnouncementsView({ announcements, courses, actions }: A
         actions={actions}
       />
 
-      <section className="mb-xl text-left relative">
-        <h2 className="font-headline-lg text-headline-lg font-bold text-primary mb-xs relative z-10">Stay in the loop</h2>
-        <p className="font-body-lg text-body-lg text-on-surface-variant relative z-10">
-          Announcements are synced from Canvas so you can spot lecturer updates without opening every course.
-        </p>
+      <section className="mb-xl flex flex-col gap-md text-left relative md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="font-headline-lg text-headline-lg font-bold text-primary mb-xs relative z-10">Stay in the loop</h2>
+          <p className="font-body-lg text-body-lg text-on-surface-variant relative z-10">
+            Announcements are synced from Canvas so you can spot lecturer updates without opening every course.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-xs self-start rounded-full border-2 border-surface-variant bg-surface-container px-lg py-sm font-label-md text-label-md text-on-surface transition-all duration-200 hover:border-primary-fixed hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60 md:self-auto"
+          onClick={actions.onSyncAnnouncements}
+          disabled={actionsDisabled}
+          title={actions.disabledReason || "Refresh announcements only"}
+        >
+          <span className={`material-symbols-outlined text-[18px] ${actions.isSyncingAnnouncements ? "animate-spin" : ""}`}>
+            sync
+          </span>
+          {actions.isSyncingAnnouncements ? "Refreshing..." : "Refresh announcements"}
+        </button>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter relative z-10">
