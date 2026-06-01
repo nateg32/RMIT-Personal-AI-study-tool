@@ -42,6 +42,24 @@ export async function POST(request: Request) {
     const assignment = input.assignmentId ? assignments.find((item) => item.id === input.assignmentId) : null;
     if (!isCustomSession && !assignment) return jsonError(new Error("Assignment not found"), 404);
 
+    if (assignment && !isDemoUser(user) && env.DATABASE_URL) {
+      const db = getDb();
+      const existingSession = await db.studySession.findFirst({
+        where: { userId: user.id, assignmentId: assignment.id },
+        orderBy: { updatedAt: "desc" },
+        include: { assignment: { include: { course: true } } },
+      });
+      const existingPlan = studyPlanSchema.safeParse(existingSession?.generatedPlanJson);
+      if (existingSession && existingPlan.success) {
+        await auditLog({
+          userId: user.id,
+          action: "study_session.reused",
+          metadata: { assignmentId: assignment.id, sessionId: existingSession.id },
+        });
+        return jsonOk({ ok: true, plan: existingPlan.data, session: existingSession, reused: true });
+      }
+    }
+
     if (input.manualPlan) {
       const plan = {
         ...input.manualPlan,

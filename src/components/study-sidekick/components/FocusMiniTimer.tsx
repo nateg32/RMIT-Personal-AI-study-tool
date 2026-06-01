@@ -9,6 +9,7 @@ import {
   focusTimerSecondsLeft,
   isFocusTimerSnapshotVisible,
   readFocusTimerSnapshot,
+  writeFocusSystemNotice,
 } from "../lib/focus-timer";
 
 function clock(seconds: number) {
@@ -76,6 +77,7 @@ export default function FocusMiniTimer({ onOpen }: { onOpen?: () => void }) {
   if (!snapshot || !view) return null;
 
   const openFocus = () => {
+    writeFocusSystemNotice("Opened your running focus session exactly where you left it.");
     window.location.assign(focusTimerResumeHref(snapshot));
     if (!snapshot.href) onOpen?.();
   };

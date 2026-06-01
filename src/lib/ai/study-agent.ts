@@ -624,6 +624,39 @@ function createStudySessionConfirmation(
 async function createStudySessionTool(input: StudyAgentInput, assignment: CanvasAssignmentSummary | null) {
   const durationMinutes = parseDurationMinutes(input.message);
   const isCustom = !assignment;
+  if (assignment && !isDemoUser(input.user) && env.DATABASE_URL) {
+    const existingSession = await getDb().studySession.findFirst({
+      where: { userId: input.user.id, assignmentId: assignment.id },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, title: true, durationMinutes: true, status: true },
+    });
+
+    if (existingSession) {
+      await auditLog({
+        userId: input.user.id,
+        action: "study_agent.study_session_reused",
+        metadata: { assignmentId: assignment.id, sessionId: existingSession.id },
+      });
+      return {
+        provider: "agent" as const,
+        model: null,
+        agentEvents: [
+          {
+            type: "study_session_created" as const,
+            label: `Existing study session opened: ${existingSession.title}`,
+            assignmentId: assignment.id,
+            sessionId: existingSession.id,
+            view: "sessions" as const,
+          },
+        ],
+        answer: [
+          `You already have a study session for ${assignment.name}.`,
+          "I reopened the existing plan instead of creating a duplicate, so your checklist, timer, and edits stay in one place.",
+        ].join("\n\n"),
+      };
+    }
+  }
+
   const context = assignment
     ? await getAssignmentContextForUser(input.user, assignment.id)
     : await getCustomFocusContextForUser(input.user, {

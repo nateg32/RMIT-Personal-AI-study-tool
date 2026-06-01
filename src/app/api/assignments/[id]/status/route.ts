@@ -23,9 +23,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const db = getDb();
     const assignment = await db.assignment.findFirst({
       where: { id, userId: user.id },
-      select: { id: true },
+      select: {
+        id: true,
+        submission: {
+          select: { id: true, submittedAt: true, workflowState: true, score: true, grade: true },
+        },
+      },
     });
     if (!assignment) return jsonError(new Error("Assignment not found"), 404);
+
+    const currentState = assignment.submission?.workflowState?.toLowerCase();
+    const isLocalOverride = currentState === "submitted_elsewhere" || currentState === "manual_complete";
+    if (input.status === "submitted_elsewhere" && isLocalOverride) {
+      return jsonOk({ ok: true, submission: assignment.submission, alreadyApplied: true });
+    }
+    if (input.status === "open" && !isLocalOverride) {
+      return jsonOk({ ok: true, submission: assignment.submission, alreadyApplied: true });
+    }
 
     const data =
       input.status === "submitted_elsewhere"

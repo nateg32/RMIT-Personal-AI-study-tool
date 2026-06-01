@@ -15,9 +15,12 @@ import { assignmentTypeLabel, compactText, formatDate, isSubmitted, riskForAssig
 import { xpForFocusMinutes } from "../lib/streak";
 import {
   clearFocusTimerSnapshot,
+  focusTimerResumeHref,
   focusTimerSecondsLeft,
+  type FocusTimerSnapshot,
   isFocusTimerSnapshotVisible,
   readFocusTimerSnapshot,
+  writeFocusSystemNotice,
   writeFocusTimerSnapshot,
 } from "../lib/focus-timer";
 
@@ -1080,6 +1083,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
   const startFocusTimer = () => {
     if (actionsDisabled) return;
+    if (guardExistingFocusSession()) return;
     publishedCompleteTimerKeys.current.delete(timerKey);
     if (activeSession) {
       void onUpdateSession(
@@ -1099,6 +1103,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
   const openFocusPreview = () => {
     if (actionsDisabled) return;
+    if (guardExistingFocusSession()) return;
     setFocusStage("brief");
     setFocusFullscreen(true);
   };
@@ -1216,7 +1221,52 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     window.location.assign("/dashboard");
   };
 
+  const restoreFocusSnapshotLocally = (snapshot: FocusTimerSnapshot) => {
+    const nextSecondsLeft = focusTimerSecondsLeft(snapshot);
+    setActiveBlockIndex(Math.max(0, snapshot.activeBlockIndex));
+
+    if (snapshot.phase === "break" || snapshot.phase === "complete") {
+      setBreakMode("breathe");
+      setBreakSecondsLeft(nextSecondsLeft);
+      setFocusStage("break");
+    } else {
+      setTimerState({
+        key: snapshot.timerKey,
+        secondsLeft: nextSecondsLeft,
+        running: Boolean(snapshot.running && nextSecondsLeft > 0),
+      });
+      setFocusStage("focus");
+    }
+
+    setFocusFullscreen(true);
+  };
+
+  const guardExistingFocusSession = () => {
+    const snapshot = readFocusTimerSnapshot();
+    if (!snapshot || !isFocusTimerSnapshotVisible(snapshot)) return false;
+    const secondsLeftFromSnapshot = focusTimerSecondsLeft(snapshot);
+    if (secondsLeftFromSnapshot <= 0 && snapshot.phase !== "complete") return false;
+
+    if (snapshot.timerKey === timerKey) {
+      restoreFocusSnapshotLocally(snapshot);
+      return true;
+    }
+
+    writeFocusSystemNotice(
+      "A different focus session is already running. I reopened it instead of starting another timer.",
+    );
+    window.location.assign(focusTimerResumeHref(snapshot));
+    return true;
+  };
+
   const openFocusInNewTab = () => {
+    const snapshot = readFocusTimerSnapshot();
+    if (snapshot && isFocusTimerSnapshotVisible(snapshot)) {
+      writeFocusSystemNotice("Opened your running focus session exactly where you left it.");
+      window.open(focusTimerResumeHref(snapshot), "_blank", "noopener,noreferrer");
+      return;
+    }
+
     const url = new URL("/study-sessions", window.location.origin);
     url.searchParams.set("focus", "1");
     url.searchParams.set("block", String(safeActiveBlockIndex));

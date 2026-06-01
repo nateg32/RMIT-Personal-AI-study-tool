@@ -25,10 +25,12 @@ import FocusMiniTimer from "./components/FocusMiniTimer";
 import {
   FOCUS_TIMER_EVENT,
   type FocusTimerSnapshot,
+  consumeFocusSystemNotice,
   focusTimerResumeHref,
   focusTimerSecondsLeft,
   isFocusTimerSnapshotVisible,
   readFocusTimerSnapshot,
+  writeFocusSystemNotice,
 } from "./lib/focus-timer";
 import type {
   ActiveOperation,
@@ -46,6 +48,7 @@ import type {
   StudySessionUpdateInput,
   StudySidekickActions,
 } from "./types";
+import { isSubmitted } from "./lib/client-utils";
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData;
@@ -207,6 +210,14 @@ function writePageRefreshCache(cache: Record<string, number>) {
 
 function pageRefreshCacheKey(syncScope: "assignments" | "announcements", canvasCourseId: number) {
   return `${syncScope}:${canvasCourseId}`;
+}
+
+function readActiveFocusSnapshot() {
+  const snapshot = readFocusTimerSnapshot();
+  if (!snapshot || !isFocusTimerSnapshotVisible(snapshot)) return null;
+  const secondsLeft = focusTimerSecondsLeft(snapshot);
+  if (secondsLeft <= 0 && snapshot.phase !== "complete") return null;
+  return snapshot;
 }
 
 async function runCourseRefreshQueue(input: {
@@ -398,6 +409,11 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   useEffect(() => {
     window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(serialisableChatMessages(chatMessages)));
   }, [chatMessages]);
+
+  useEffect(() => {
+    const focusNotice = consumeFocusSystemNotice();
+    if (focusNotice) setActionMessage(focusNotice);
+  }, []);
 
   useEffect(() => {
     const snapshot = readFocusTimerSnapshot();
@@ -740,14 +756,53 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
     }
   }, [beginOperation, dashboard.riskLevel, endOperation, refreshData]);
 
+  const resumeFocusSnapshot = useCallback((snapshot: FocusTimerSnapshot, message: string) => {
+    setActionMessage(message);
+    writeFocusSystemNotice(message);
+    window.location.assign(focusTimerResumeHref(snapshot));
+  }, []);
+
+  const redirectIfActiveFocus = useCallback(
+    (intent?: { assignmentId?: string | null; sessionId?: string | null }) => {
+      const snapshot = readActiveFocusSnapshot();
+      if (!snapshot) return false;
+
+      const sameAssignment = Boolean(intent?.assignmentId && snapshot.assignmentId === intent.assignmentId);
+      const sameSession = Boolean(intent?.sessionId && snapshot.sessionId === intent.sessionId);
+      const message =
+        sameAssignment || sameSession
+          ? "That focus session is already running. I reopened it where you left off instead of starting it again."
+          : "A focus session is already running. I reopened it so your timer and progress stay in one place.";
+      resumeFocusSnapshot(snapshot, message);
+      return true;
+    },
+    [resumeFocusSnapshot],
+  );
+
   const createStudySession = useCallback(
     async (input: CreateStudySessionInput) => {
+      if (redirectIfActiveFocus({ assignmentId: input.assignmentId || null })) return;
+
+      const existingAssignmentSession = input.assignmentId
+        ? studySessions.find((session) => session.assignmentId === input.assignmentId)
+        : null;
+      if (existingAssignmentSession) {
+        const assignmentName =
+          assignments.find((assignment) => assignment.id === input.assignmentId)?.name || existingAssignmentSession.title;
+        setSelectedAssignmentId(input.assignmentId || null);
+        setActiveView("sessions");
+        setActionMessage(
+          `You already have a study session for ${assignmentName}. I opened that session instead of creating a duplicate.`,
+        );
+        return;
+      }
+
       const operation = beginOperation({ type: "session", label: "Study session planning", view: "sessions" });
       if (!operation) return;
       setIsCreatingSession(true);
       setActionMessage(input.assignmentId ? "Building a Canvas-specific study session..." : "Saving your custom focus session...");
       try {
-        const payload = await apiJson<{ ok: boolean; plan: StudyPlan; session?: StudySessionRecord | null }>("/api/study-sessions", {
+        const payload = await apiJson<{ ok: boolean; plan: StudyPlan; session?: StudySessionRecord | null; reused?: boolean }>("/api/study-sessions", {
           method: "POST",
           body: JSON.stringify(input),
         });
@@ -762,7 +817,9 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         setSelectedAssignmentId(input.assignmentId || null);
         setActiveView("sessions");
         setActionMessage(
-          input.assignmentId
+          payload.reused
+            ? "That assignment already had a study session. I reopened the existing plan so there is one source of truth."
+            : input.assignmentId
             ? "Study session created from assignment details, rubric, files, and recent course context."
             : "Custom focus plan created. Review the blocks, tweak anything you want, then start the timer when it feels right.",
         );
@@ -773,7 +830,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         endOperation(operation);
       }
     },
-    [beginOperation, endOperation, refreshData],
+    [assignments, beginOperation, endOperation, redirectIfActiveFocus, refreshData, studySessions],
   );
 
   const removeAssignmentEverywhere = useCallback((assignmentId: string) => {
@@ -933,6 +990,24 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
 
   const updateAssignmentStatus = useCallback(
     async (assignmentId: string, status: "open" | "submitted_elsewhere") => {
+      const currentAssignment = assignments.find((assignment) => assignment.id === assignmentId);
+      const currentState = currentAssignment?.workflowState?.toLowerCase();
+      const isLocalOverride = currentState === "submitted_elsewhere" || currentState === "manual_complete";
+      if (status === "submitted_elsewhere" && isLocalOverride) {
+        removeAssignmentEverywhere(assignmentId);
+        setActionMessage("That assignment is already marked done locally, so I kept it out of the dashboard.");
+        return;
+      }
+      if (status === "submitted_elsewhere" && currentAssignment && isSubmitted(currentAssignment) && !isLocalOverride) {
+        removeAssignmentEverywhere(assignmentId);
+        setActionMessage("Canvas already shows this as submitted or graded, so I kept it out of the dashboard without adding a local override.");
+        return;
+      }
+      if (status === "open" && !isLocalOverride) {
+        setActionMessage("Nothing to reopen locally. Only assignments you marked done elsewhere can be reopened here.");
+        return;
+      }
+
       const operation = beginOperation({ type: "assignment_status", label: "Assignment status update", view: "assignments" });
       if (!operation) return;
       setActionMessage(status === "submitted_elsewhere" ? "Marking assignment done locally..." : "Reopening assignment locally...");
@@ -970,7 +1045,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
         endOperation(operation);
       }
     },
-    [assignments, beginOperation, endOperation, refreshData],
+    [assignments, beginOperation, endOperation, refreshData, removeAssignmentEverywhere],
   );
 
   const uploadMaterial = useCallback(
@@ -1267,12 +1342,17 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
   );
 
   const startSession = useCallback(() => {
+    if (redirectIfActiveFocus()) return;
+    if (activeOperationRef.current) {
+      setActionMessage(`${activeOperationRef.current.label} is already running. I paused Start Session so updates do not overlap.`);
+      return;
+    }
     setActiveView("sessions");
     setSelectedAssignmentId((current) => current || assignments[0]?.id || null);
     if (!assignments.length) {
       setActionMessage("Sync Canvas first, then I can build a focus session from a real assignment.");
     }
-  }, [assignments]);
+  }, [assignments, redirectIfActiveFocus]);
 
   const hiddenAssignmentIds = useMemo(
     () => Array.from(new Set([...dashboardScope.excludedAssignmentIds, ...dashboardScope.hiddenAssignments.map((assignment) => assignment.id)])),

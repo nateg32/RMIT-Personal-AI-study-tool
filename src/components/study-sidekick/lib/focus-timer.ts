@@ -2,6 +2,7 @@
 
 export const FOCUS_TIMER_STORAGE_KEY = "study-sidekick-focus-timer-v1";
 export const FOCUS_TIMER_EVENT = "study-sidekick-focus-timer-change";
+export const FOCUS_NOTICE_STORAGE_KEY = "study-sidekick-focus-notice-v1";
 
 export type FocusTimerPhase = "focus" | "break" | "complete";
 
@@ -112,6 +113,33 @@ export function focusTimerResumeHref(snapshot: FocusTimerSnapshot, origin?: stri
   if (snapshot.customSessionId) url.searchParams.set("customSessionId", snapshot.customSessionId);
 
   return `${url.pathname}${url.search}`;
+}
+
+export function writeFocusSystemNotice(message: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    FOCUS_NOTICE_STORAGE_KEY,
+    JSON.stringify({
+      message,
+      createdAt: Date.now(),
+    }),
+  );
+}
+
+export function consumeFocusSystemNotice(maxAgeMs = 60_000) {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(FOCUS_NOTICE_STORAGE_KEY);
+    if (!stored) return null;
+    window.localStorage.removeItem(FOCUS_NOTICE_STORAGE_KEY);
+    const parsed = JSON.parse(stored) as { message?: unknown; createdAt?: unknown };
+    if (typeof parsed.message !== "string" || typeof parsed.createdAt !== "number") return null;
+    if (Date.now() - parsed.createdAt > maxAgeMs) return null;
+    return parsed.message;
+  } catch {
+    window.localStorage.removeItem(FOCUS_NOTICE_STORAGE_KEY);
+    return null;
+  }
 }
 
 export function focusTimerSecondsLeft(snapshot: FocusTimerSnapshot, now = Date.now()) {
