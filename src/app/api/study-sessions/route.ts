@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { requireUser, isDemoUser } from "@/lib/auth";
@@ -9,7 +10,7 @@ import {
   getStudySessionGeminiMaterialsForUser,
 } from "@/lib/data/assignment-context";
 import { getAssignmentsForUser, getStudySessionsForUser } from "@/lib/data/lists";
-import { generateStudySession } from "@/lib/ai/gemini";
+import { generateStudySession, studyPlanSchema } from "@/lib/ai/gemini";
 import { env } from "@/lib/env";
 
 const createStudySessionSchema = z.object({
@@ -20,6 +21,7 @@ const createStudySessionSchema = z.object({
   mode: z.string().min(2).default("Plan assignment"),
   energyLevel: z.string().min(2).default("Medium"),
   targetOutcome: z.string().min(2).default("Credit"),
+  manualPlan: studyPlanSchema.optional(),
 });
 
 export async function GET() {
@@ -39,6 +41,40 @@ export async function POST(request: Request) {
     const assignments = isCustomSession ? [] : await getAssignmentsForUser(user);
     const assignment = input.assignmentId ? assignments.find((item) => item.id === input.assignmentId) : null;
     if (!isCustomSession && !assignment) return jsonError(new Error("Assignment not found"), 404);
+
+    if (input.manualPlan) {
+      const plan = {
+        ...input.manualPlan,
+        title: input.customTitle || input.manualPlan.title,
+        durationMinutes: Math.max(15, Math.min(480, Math.round(input.manualPlan.durationMinutes || input.durationMinutes))),
+      };
+
+      let session = null;
+      if (!isDemoUser(user) && env.DATABASE_URL) {
+        const db = getDb();
+        session = await db.studySession.create({
+          data: {
+            userId: user.id,
+            assignmentId: assignment?.id || null,
+            title: plan.title,
+            durationMinutes: plan.durationMinutes,
+            mode: input.mode,
+            targetOutcome: input.targetOutcome,
+            energyLevel: input.energyLevel,
+            generatedPlanJson: plan as Prisma.InputJsonValue,
+          },
+          include: { assignment: { include: { course: true } } },
+        });
+        await auditLog({
+          userId: user.id,
+          action: "study_session.created",
+          metadata: { assignmentId: assignment?.id || null, custom: isCustomSession, manual: true },
+        });
+      }
+
+      return jsonOk({ ok: true, plan, session });
+    }
+
     if (isCustomSession && !input.customTitle && !input.customFocus) {
       return jsonError(new Error("Add a focus title or notes before creating a custom session."), 400);
     }
@@ -77,7 +113,7 @@ export async function POST(request: Request) {
           mode: input.mode,
           targetOutcome: input.targetOutcome,
           energyLevel: input.energyLevel,
-          generatedPlanJson: plan,
+          generatedPlanJson: plan as Prisma.InputJsonValue,
         },
       });
       await auditLog({

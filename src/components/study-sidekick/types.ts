@@ -237,6 +237,7 @@ export type CreateStudySessionInput = {
   mode: string;
   energyLevel: string;
   targetOutcome: string;
+  manualPlan?: StudyPlan;
 };
 
 export type DashboardScopeSummary = {

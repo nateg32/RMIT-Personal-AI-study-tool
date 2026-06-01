@@ -47,9 +47,16 @@ const defaultSessionSettings = {
   energyLevel: "Medium",
   targetOutcome: "Credit",
 };
+const newCustomSessionId = "__new_custom_session";
 
+type SessionSource = "canvas" | "custom";
 type FocusStage = "brief" | "lock" | "focus" | "break";
 type BreakMode = "breathe" | "memory" | "activities";
+type CustomBlockDraft = {
+  name: string;
+  minutes: string;
+  tasks: string;
+};
 
 function clampMinutes(value: number) {
   return Math.max(5, Math.min(240, Number.isFinite(value) ? Math.round(value) : defaultDuration));
@@ -65,6 +72,86 @@ function textLines(value: string) {
     .split(/\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function createCustomBlockDraft(index = 0): CustomBlockDraft {
+  return {
+    name: index === 0 ? "Focus block" : `Block ${index + 1}`,
+    minutes: index === 0 ? "25" : "15",
+    tasks: "",
+  };
+}
+
+function customBlockTasks(block: CustomBlockDraft, fallbackFocus: string) {
+  const tasks = textLines(block.tasks).slice(0, 8);
+  if (tasks.length) return tasks;
+  const fallback = fallbackFocus.trim();
+  return fallback ? [fallback] : ["Work on this focus task"];
+}
+
+function buildCustomSessionPlan(title: string, focus: string, blocks: CustomBlockDraft[]): StudyPlan {
+  const focusTitle = title.trim() || "Custom focus session";
+  const normalisedBlocks = blocks
+    .filter((block) => block.name.trim() || block.tasks.trim() || focus.trim())
+    .slice(0, 6)
+    .map((block, index) => {
+      const name = block.name.trim() || `Block ${index + 1}`;
+      const minutes = clampMinutes(Number(block.minutes || (index === 0 ? 25 : 15)));
+      const tasks = customBlockTasks(block, focus);
+      return {
+        name,
+        minutes,
+        tasks,
+        goal: tasks[0],
+        breakMinutes: index < blocks.length - 1 && minutes >= 25 ? 5 : undefined,
+      };
+    });
+  const safeBlocks = normalisedBlocks.length
+    ? normalisedBlocks
+    : [
+        {
+          name: "Focus block",
+          minutes: 25,
+          tasks: [focus.trim() || "Work on this focus task"],
+          goal: focus.trim() || "Make focused progress.",
+        },
+      ];
+  const durationMinutes = safeBlocks.reduce((total, block) => total + block.minutes, 0);
+  const checklist = safeBlocks
+    .flatMap((block) => block.tasks)
+    .map((task) => cleanPlanText(task, 90))
+    .filter(Boolean)
+    .slice(0, 8);
+
+  return {
+    title: focusTitle,
+    durationMinutes: Math.max(15, Math.min(480, durationMinutes)),
+    riskLevel: "low",
+    contextConfidence: "high",
+    contextSummary: [
+      "Custom focus created by you.",
+      `${safeBlocks.length} time block${safeBlocks.length === 1 ? "" : "s"} planned.`,
+      "Canvas is optional for this session.",
+    ],
+    needsUserContext: false,
+    analysisSummary: focus.trim()
+      ? `This is a self-directed focus session for: ${cleanPlanText(focus, 180)}`
+      : "This is a self-directed focus session built from your own time blocks.",
+    assignmentBrief: focus.trim() || "Custom focus session.",
+    deliverables: safeBlocks.map((block) => `${block.name}: ${cleanPlanText(block.tasks[0], 90)}`),
+    successCriteria: checklist.length ? checklist.slice(0, 4) : ["Finish the planned block", "Write the next action"],
+    rubricFocus: [],
+    blocks: safeBlocks,
+    checklist: checklist.length ? checklist : ["Finish the focus block", "Write the next action"],
+    definitionOfDone: [
+      "The planned blocks are completed or intentionally paused.",
+      "Any unfinished work has a clear next action.",
+      "Progress is saved in Sidekick.",
+    ],
+    resourcesToOpen: [],
+    resourcePlan: [],
+    nextAction: safeBlocks[0]?.tasks[0] || "Start the first focus block.",
+  };
 }
 
 function minutesToClock(seconds: number) {
@@ -324,8 +411,13 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     isCreatingSession,
     actions,
   } = props;
+  const [sessionSource, setSessionSource] = useState<SessionSource>("canvas");
   const [duration, setDuration] = useState(defaultDuration);
   const [userContext, setUserContext] = useState("");
+  const [selectedCustomSessionId, setSelectedCustomSessionId] = useState(newCustomSessionId);
+  const [customTitle, setCustomTitle] = useState("Custom focus session");
+  const [customFocus, setCustomFocus] = useState("");
+  const [customBlocks, setCustomBlocks] = useState<CustomBlockDraft[]>([createCustomBlockDraft()]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [showPlanEditor, setShowPlanEditor] = useState(false);
   const [focusFullscreen, setFocusFullscreen] = useState(false);
@@ -339,15 +431,31 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
   const [checklistDraft, setChecklistDraft] = useState("");
   const completedTimerKeys = useRef(new Set<string>());
+  const customSessionCountRef = useRef(sessions.filter((session) => !session.assignmentId).length);
 
+  const customSessions = useMemo(() => sessions.filter((session) => !session.assignmentId), [sessions]);
+  const selectedCustomSession =
+    selectedCustomSessionId === newCustomSessionId
+      ? null
+      : customSessions.find((session) => session.id === selectedCustomSessionId) || null;
+  const customDraftPlan = useMemo(
+    () => buildCustomSessionPlan(customTitle, customFocus, customBlocks),
+    [customBlocks, customFocus, customTitle],
+  );
   const selectedAssignment =
-    assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignments[0] || null;
+    sessionSource === "canvas"
+      ? assignments.find((assignment) => assignment.id === selectedAssignmentId) || assignments[0] || null
+      : null;
   const activeSession =
-    sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) || null;
-  const plan = activeSession?.generatedPlanJson || fallbackPlan(selectedAssignment, duration);
+    sessionSource === "custom"
+      ? selectedCustomSession
+      : sessions.find((session) => session.assignmentId && session.assignmentId === selectedAssignment?.id) || null;
+  const plan =
+    activeSession?.generatedPlanJson ||
+    (sessionSource === "custom" ? customDraftPlan : fallbackPlan(selectedAssignment, duration));
   const confidence = contextConfidenceForAssignment(selectedAssignment, plan);
   const confidenceDetails = confidenceCopy(confidence);
-  const needsUserContext = plan.needsUserContext || confidence === "low";
+  const needsUserContext = sessionSource === "canvas" && (plan.needsUserContext || confidence === "low");
   const safeActiveBlockIndex = Math.min(activeBlockIndex, Math.max(0, plan.blocks.length - 1));
   const activeBlock = plan.blocks[safeActiveBlockIndex] || plan.blocks[0];
   const totalSeconds = Math.max(60, (activeBlock?.minutes || duration) * 60);
@@ -372,7 +480,13 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const deliverables = inferredDeliverables(plan, selectedAssignment);
   const successCriteria = inferredSuccessCriteria(plan, selectedAssignment);
   const resourcePlan = inferredResources(plan);
-  const summaryItems = plan.contextSummary?.length
+  const summaryItems = sessionSource === "custom"
+    ? [
+        activeSession ? "Saved custom focus session." : "Manual plan from your own blocks.",
+        `${plan.blocks.length} block${plan.blocks.length === 1 ? "" : "s"}, ${plan.durationMinutes} minutes.`,
+        "Canvas is optional for this session.",
+      ]
+    : plan.contextSummary?.length
     ? plan.contextSummary
     : [
         selectedAssignment?.description ? "Canvas assignment description found." : "Canvas assignment description is missing.",
@@ -380,6 +494,24 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
       ];
   const whatMatters = (successCriteria.length ? successCriteria : deliverables).slice(0, 4);
   const laterBlocks = plan.blocks.slice(safeActiveBlockIndex + 1, safeActiveBlockIndex + 4);
+  const customReady =
+    Boolean(customTitle.trim()) &&
+    (Boolean(customFocus.trim()) || customBlocks.some((block) => block.tasks.trim()));
+
+  useEffect(() => {
+    if (sessionSource !== "custom") {
+      customSessionCountRef.current = customSessions.length;
+      return;
+    }
+    if (
+      !isCreatingSession &&
+      selectedCustomSessionId === newCustomSessionId &&
+      customSessions.length > customSessionCountRef.current
+    ) {
+      setSelectedCustomSessionId(customSessions[0]?.id || newCustomSessionId);
+    }
+    customSessionCountRef.current = customSessions.length;
+  }, [customSessions, isCreatingSession, selectedCustomSessionId, sessionSource]);
 
   useEffect(() => {
     if (!running) return;
@@ -456,6 +588,28 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
   const generateSession = () => {
     if (actionsDisabled) return;
+    if (sessionSource === "custom") {
+      if (!customReady) {
+        actions.onOpenChat("Add a title plus at least one focus task or time block before creating a custom session.");
+        return;
+      }
+      onCreateSession({
+        assignmentId: null,
+        customTitle: customDraftPlan.title,
+        customFocus:
+          customFocus.trim() ||
+          customDraftPlan.blocks
+            .flatMap((block) => block.tasks)
+            .filter(Boolean)
+            .join("\n"),
+        durationMinutes: customDraftPlan.durationMinutes,
+        mode: "Custom focus",
+        energyLevel: "Manual",
+        targetOutcome: "Just complete",
+        manualPlan: customDraftPlan,
+      });
+      return;
+    }
     if (!selectedAssignment) {
       actions.onOpenChat("I need Canvas assignments before I can build a focused session.");
       return;
@@ -600,6 +754,26 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
       return;
     }
     setMemoryInput(nextInput);
+  };
+
+  const updateCustomBlock = (index: number, updates: Partial<CustomBlockDraft>) => {
+    setCustomBlocks((current) =>
+      current.map((block, blockIndex) => (blockIndex === index ? { ...block, ...updates } : block)),
+    );
+    setSelectedCustomSessionId(newCustomSessionId);
+  };
+
+  const addCustomBlock = () => {
+    setCustomBlocks((current) => [...current, createCustomBlockDraft(current.length)].slice(0, 6));
+    setSelectedCustomSessionId(newCustomSessionId);
+  };
+
+  const removeCustomBlock = (index: number) => {
+    setCustomBlocks((current) => {
+      const next = current.filter((_, blockIndex) => blockIndex !== index);
+      return next.length ? next : [createCustomBlockDraft()];
+    });
+    setSelectedCustomSessionId(newCustomSessionId);
   };
 
   const askAboutSession = () => {
@@ -888,10 +1062,10 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
       <div className="max-w-7xl mx-auto w-full flex-grow pb-xl">
         <div className="mb-lg mt-sm">
-          <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Assignment to session</p>
-          <h1 className="font-display-lg text-display-lg text-primary mb-xs">Pick the task. Get the plan. Start.</h1>
+          <p className="font-label-md text-label-md uppercase tracking-wide text-primary">Focus sessions</p>
+          <h1 className="font-display-lg text-display-lg text-primary mb-xs">Pick a task or build your own.</h1>
           <p className="max-w-2xl text-body-lg font-body-lg text-on-surface-variant">
-            Sidekick reads Canvas facts first, asks for extra context only when the assignment is too thin, then turns the work into a simple timer-ready session.
+            Use Canvas when you want Sidekick to plan from assignment facts, or make a custom session when you just need a clean timer with your own blocks.
           </p>
         </div>
 
@@ -899,133 +1073,287 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
           <div className="col-span-12 lg:col-span-4 space-y-gutter">
             <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim">
               <div className="flex items-center gap-sm mb-md">
-                <span className="material-symbols-outlined text-primary">assignment</span>
-                <h2 className="font-headline-md text-headline-md">Choose assignment</h2>
+                <span className="material-symbols-outlined text-primary">route</span>
+                <h2 className="font-headline-md text-headline-md">Session source</h2>
               </div>
-              <select
-                value={selectedAssignment?.id || ""}
-                onChange={(event) => {
-                  onSelectAssignment(event.target.value || null);
-                  setUserContext("");
-                  setActiveBlockIndex(0);
-                  setShowPlanEditor(false);
-                  setTimerState({ key: "", secondsLeft: duration * 60, running: false });
-                }}
-                className="w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
-              >
-                {assignments.length ? (
-                  assignments.map((assignment) => (
-                    <option key={assignment.id} value={assignment.id}>
-                      {assignment.courseName}: {assignment.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No assignments synced</option>
-                )}
-              </select>
-
-              {selectedAssignment ? (
-                <div className="mt-md rounded-lg border-2 border-surface-variant bg-white p-sm">
-                  <p className="font-label-md text-label-md uppercase text-on-surface-variant">
-                    {selectedAssignment.courseName}
-                  </p>
-                  <h3 className="mt-xs font-headline-sm text-headline-sm text-on-surface">{selectedAssignment.name}</h3>
-                  <div className="mt-sm flex flex-wrap gap-xs">
-                    <span className="rounded-full bg-primary-container px-sm py-1 font-label-md text-label-md text-primary">
-                      {formatDate(selectedAssignment.dueAt)}
-                    </span>
-                    <span className="rounded-full bg-surface-container px-sm py-1 font-label-md text-label-md text-on-surface-variant">
-                      {statusLabel(selectedAssignment)}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="mt-sm bubbly-button w-full rounded-full border-2 border-surface-variant bg-surface-container py-xs font-label-md text-label-md text-on-surface disabled:opacity-60"
-                    onClick={() =>
-                      onUpdateAssignmentStatus(
-                        selectedAssignment.id,
-                        isSubmitted(selectedAssignment) ? "open" : "submitted_elsewhere",
-                      )
-                    }
-                    disabled={actionsDisabled}
-                    title={actions.disabledReason || undefined}
-                  >
-                    {isSubmitted(selectedAssignment) ? "Reopen locally" : "Mark done elsewhere"}
-                  </button>
-                </div>
-              ) : (
-                <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
-                  Sync Canvas first, then choose the assignment you want to work on.
-                </p>
-              )}
-            </div>
-
-            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim">
-              <div className="flex items-start gap-sm">
-                <span className="material-symbols-outlined text-primary">{confidenceDetails.icon}</span>
-                <div>
-                  <h2 className="font-headline-md text-headline-md">{confidenceDetails.label}</h2>
-                  <p className="mt-xs font-body-md text-body-md text-on-surface-variant">{confidenceDetails.body}</p>
-                </div>
-              </div>
-              <div className="mt-md space-y-xs">
-                {summaryItems.slice(0, 4).map((item) => cleanPlanText(item, 120)).filter(Boolean).map((item) => (
-                  <p key={item} className="flex gap-xs font-label-md text-label-md text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
-                    <span>{item}</span>
-                  </p>
-                ))}
-              </div>
-              {needsUserContext ? (
-                <label className="mt-md block">
-                  <span className="font-label-md text-label-md text-on-surface-variant">
-                    Optional brief for a sharper plan
-                  </span>
-                  <textarea
-                    value={userContext}
-                    onChange={(event) => setUserContext(event.target.value)}
-                    placeholder="Paste the assignment instructions or write what needs to be done."
-                    className="mt-xs min-h-28 w-full resize-y rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
-                  />
-                </label>
-              ) : null}
-            </div>
-
-            <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
-              <div className="flex items-center justify-between gap-sm">
-                <h2 className="font-headline-md text-headline-md">Length</h2>
-                <span className="font-label-md text-label-md text-on-surface-variant">{duration} minutes</span>
-              </div>
-              <div className="mt-md grid grid-cols-3 gap-sm">
-                {durationOptions.map((value) => (
+              <div className="grid grid-cols-2 gap-xs rounded-full bg-surface-container p-1">
+                {[
+                  ["canvas", "Canvas task"],
+                  ["custom", "Custom focus"],
+                ].map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
-                    className={`rounded-full border-2 px-sm py-sm font-label-md text-label-md transition-all ${
-                      duration === value ? "border-primary bg-primary-container text-primary" : "border-surface-variant bg-white"
+                    className={`rounded-full px-sm py-xs font-label-md text-label-md transition-all ${
+                      sessionSource === value ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant"
                     }`}
                     onClick={() => {
-                      setDuration(value);
+                      setSessionSource(value as SessionSource);
+                      setUserContext("");
                       setActiveBlockIndex(0);
                       setShowPlanEditor(false);
-                      setTimerState({ key: "", secondsLeft: value * 60, running: false });
+                      setTimerState({ key: "", secondsLeft: duration * 60, running: false });
                     }}
                   >
-                    {value}m
+                    {label}
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className="mt-md bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg disabled:opacity-60"
-                onClick={generateSession}
-                disabled={isCreatingSession || !selectedAssignment || actionsDisabled}
-                title={actions.disabledReason || undefined}
-              >
-                <span className="material-symbols-outlined">auto_awesome</span>
-                {isCreatingSession ? "Building plan..." : activeSession ? "Regenerate plan" : "Create plan"}
-              </button>
+
+              {sessionSource === "canvas" ? (
+                <>
+                  <select
+                    value={selectedAssignment?.id || ""}
+                    onChange={(event) => {
+                      onSelectAssignment(event.target.value || null);
+                      setUserContext("");
+                      setActiveBlockIndex(0);
+                      setShowPlanEditor(false);
+                      setTimerState({ key: "", secondsLeft: duration * 60, running: false });
+                    }}
+                    className="mt-md w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
+                  >
+                    {assignments.length ? (
+                      assignments.map((assignment) => (
+                        <option key={assignment.id} value={assignment.id}>
+                          {assignment.courseName}: {assignment.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No assignments synced</option>
+                    )}
+                  </select>
+
+                  {selectedAssignment ? (
+                    <div className="mt-md rounded-lg border-2 border-surface-variant bg-white p-sm">
+                      <p className="font-label-md text-label-md uppercase text-on-surface-variant">
+                        {selectedAssignment.courseName}
+                      </p>
+                      <h3 className="mt-xs font-headline-sm text-headline-sm text-on-surface">{selectedAssignment.name}</h3>
+                      <div className="mt-sm flex flex-wrap gap-xs">
+                        <span className="rounded-full bg-primary-container px-sm py-1 font-label-md text-label-md text-primary">
+                          {formatDate(selectedAssignment.dueAt)}
+                        </span>
+                        <span className="rounded-full bg-surface-container px-sm py-1 font-label-md text-label-md text-on-surface-variant">
+                          {statusLabel(selectedAssignment)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="mt-sm bubbly-button w-full rounded-full border-2 border-surface-variant bg-surface-container py-xs font-label-md text-label-md text-on-surface disabled:opacity-60"
+                        onClick={() =>
+                          onUpdateAssignmentStatus(
+                            selectedAssignment.id,
+                            isSubmitted(selectedAssignment) ? "open" : "submitted_elsewhere",
+                          )
+                        }
+                        disabled={actionsDisabled}
+                        title={actions.disabledReason || undefined}
+                      >
+                        {isSubmitted(selectedAssignment) ? "Reopen locally" : "Mark done elsewhere"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
+                      Sync Canvas first, then choose the assignment you want to work on.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="mt-md space-y-sm">
+                  {customSessions.length ? (
+                    <label className="block">
+                      <span className="font-label-md text-label-md text-on-surface-variant">Saved custom sessions</span>
+                      <select
+                        value={selectedCustomSessionId}
+                        onChange={(event) => {
+                          setSelectedCustomSessionId(event.target.value);
+                          setActiveBlockIndex(0);
+                          setShowPlanEditor(false);
+                          setTimerState({ key: "", secondsLeft: duration * 60, running: false });
+                        }}
+                        className="mt-xs w-full rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
+                      >
+                        <option value={newCustomSessionId}>New custom focus</option>
+                        {customSessions.map((session) => (
+                          <option key={session.id} value={session.id}>
+                            {session.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+
+                  {selectedCustomSession ? (
+                    <div className="rounded-lg border-2 border-primary-fixed-dim bg-primary-container/30 p-sm">
+                      <p className="font-label-md text-label-md uppercase text-primary">Saved focus</p>
+                      <h3 className="mt-xs font-headline-sm text-headline-sm text-on-surface">{selectedCustomSession.title}</h3>
+                      <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
+                        {selectedCustomSession.generatedPlanJson.blocks.length} blocks - {selectedCustomSession.durationMinutes} minutes.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="block">
+                        <span className="font-label-md text-label-md text-on-surface-variant">Focus title</span>
+                        <input
+                          value={customTitle}
+                          onChange={(event) => setCustomTitle(event.target.value)}
+                          className="mt-xs w-full rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
+                          placeholder="e.g. Python practice sprint"
+                          maxLength={120}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="font-label-md text-label-md text-on-surface-variant">What are you doing?</span>
+                        <textarea
+                          value={customFocus}
+                          onChange={(event) => setCustomFocus(event.target.value)}
+                          className="mt-xs min-h-24 w-full resize-y rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
+                          placeholder="One short sentence. Keep it specific."
+                          maxLength={900}
+                        />
+                      </label>
+                      <div>
+                        <div className="flex items-center justify-between gap-sm">
+                          <p className="font-label-md text-label-md text-on-surface-variant">Time blocks</p>
+                          <span className="font-label-md text-label-md text-primary">{customDraftPlan.durationMinutes}m total</span>
+                        </div>
+                        <div className="mt-xs space-y-xs">
+                          {customBlocks.map((block, index) => (
+                            <div key={index} className="rounded-lg border-2 border-surface-variant bg-white p-sm">
+                              <div className="grid grid-cols-[1fr_5.5rem_auto] gap-xs">
+                                <input
+                                  value={block.name}
+                                  onChange={(event) => updateCustomBlock(index, { name: event.target.value })}
+                                  className="rounded-md border border-surface-variant bg-white px-sm py-xs font-body-md focus:border-primary focus:outline-none"
+                                  placeholder="Block name"
+                                  maxLength={80}
+                                />
+                                <input
+                                  type="number"
+                                  min={5}
+                                  max={240}
+                                  value={block.minutes}
+                                  onChange={(event) => updateCustomBlock(index, { minutes: event.target.value })}
+                                  className="rounded-md border border-surface-variant bg-white px-sm py-xs font-body-md focus:border-primary focus:outline-none"
+                                  aria-label={`Minutes for block ${index + 1}`}
+                                />
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-surface-variant px-xs text-on-surface-variant disabled:opacity-40"
+                                  onClick={() => removeCustomBlock(index)}
+                                  disabled={customBlocks.length <= 1}
+                                  aria-label={`Remove block ${index + 1}`}
+                                >
+                                  <span className="material-symbols-outlined text-[18px]">close</span>
+                                </button>
+                              </div>
+                              <textarea
+                                value={block.tasks}
+                                onChange={(event) => updateCustomBlock(index, { tasks: event.target.value })}
+                                className="mt-xs min-h-20 w-full resize-y rounded-md border border-surface-variant bg-white px-sm py-xs font-body-md focus:border-primary focus:outline-none"
+                                placeholder="Tasks for this block, one per line"
+                                maxLength={1_200}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="mt-xs rounded-full border-2 border-primary-fixed-dim bg-white px-sm py-xs font-label-md text-label-md text-primary disabled:opacity-50"
+                          onClick={addCustomBlock}
+                          disabled={customBlocks.length >= 6}
+                        >
+                          Add block
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg disabled:opacity-60"
+                        onClick={generateSession}
+                        disabled={isCreatingSession || !customReady || actionsDisabled}
+                        title={actions.disabledReason || undefined}
+                      >
+                        <span className="material-symbols-outlined">add_task</span>
+                        {isCreatingSession ? "Saving focus..." : "Create custom session"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
+
+            {sessionSource === "canvas" ? (
+              <>
+                <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-primary-fixed-dim">
+                  <div className="flex items-start gap-sm">
+                    <span className="material-symbols-outlined text-primary">{confidenceDetails.icon}</span>
+                    <div>
+                      <h2 className="font-headline-md text-headline-md">{confidenceDetails.label}</h2>
+                      <p className="mt-xs font-body-md text-body-md text-on-surface-variant">{confidenceDetails.body}</p>
+                    </div>
+                  </div>
+                  <div className="mt-md space-y-xs">
+                    {summaryItems.slice(0, 4).map((item) => cleanPlanText(item, 120)).filter(Boolean).map((item) => (
+                      <p key={item} className="flex gap-xs font-label-md text-label-md text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[18px] text-primary">check_small</span>
+                        <span>{item}</span>
+                      </p>
+                    ))}
+                  </div>
+                  {needsUserContext ? (
+                    <label className="mt-md block">
+                      <span className="font-label-md text-label-md text-on-surface-variant">
+                        Optional brief for a sharper plan
+                      </span>
+                      <textarea
+                        value={userContext}
+                        onChange={(event) => setUserContext(event.target.value)}
+                        placeholder="Paste the assignment instructions or write what needs to be done."
+                        className="mt-xs min-h-28 w-full resize-y rounded-lg border-2 border-surface-variant bg-white p-sm font-body-md focus:border-primary focus:outline-none"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <div className="straight-panel bg-surface-container-lowest p-md rounded-lg border-2 border-surface-variant">
+                  <div className="flex items-center justify-between gap-sm">
+                    <h2 className="font-headline-md text-headline-md">Length</h2>
+                    <span className="font-label-md text-label-md text-on-surface-variant">{duration} minutes</span>
+                  </div>
+                  <div className="mt-md grid grid-cols-3 gap-sm">
+                    {durationOptions.map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`rounded-full border-2 px-sm py-sm font-label-md text-label-md transition-all ${
+                          duration === value ? "border-primary bg-primary-container text-primary" : "border-surface-variant bg-white"
+                        }`}
+                        onClick={() => {
+                          setDuration(value);
+                          setActiveBlockIndex(0);
+                          setShowPlanEditor(false);
+                          setTimerState({ key: "", secondsLeft: value * 60, running: false });
+                        }}
+                      >
+                        {value}m
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-md bubbly-button flex w-full items-center justify-center gap-sm rounded-full bg-primary py-md font-bold text-on-primary shadow-lg disabled:opacity-60"
+                    onClick={generateSession}
+                    disabled={isCreatingSession || !selectedAssignment || actionsDisabled}
+                    title={actions.disabledReason || undefined}
+                  >
+                    <span className="material-symbols-outlined">auto_awesome</span>
+                    {isCreatingSession ? "Building plan..." : activeSession ? "Regenerate plan" : "Create plan"}
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
 
           <div className="col-span-12 lg:col-span-8 space-y-gutter">
@@ -1033,7 +1361,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
               <div className="flex flex-col gap-md md:flex-row md:items-start md:justify-between">
                 <div>
                   <p className="font-label-md text-label-md uppercase tracking-wide text-primary">
-                    {activeSession ? "AI plan ready" : "Draft preview"}
+                    {activeSession ? (sessionSource === "custom" ? "Focus plan ready" : "AI plan ready") : "Draft preview"}
                   </p>
                   <h2 className="mt-xs font-display-md text-display-md text-primary">{plan.title}</h2>
                   <p className="mt-sm max-w-3xl font-body-lg text-body-lg text-on-surface-variant">
