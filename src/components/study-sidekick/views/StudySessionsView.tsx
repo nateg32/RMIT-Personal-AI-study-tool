@@ -861,15 +861,15 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
           ) : null}
 
           {focusStage === "lock" ? (
-            <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-2xl flex-col items-center justify-center px-lg py-xl text-center">
+            <div className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-3xl flex-col items-center justify-center px-lg py-xl text-center">
               <p className="font-label-md text-label-md uppercase tracking-widest text-primary">One last reset</p>
               <h2 className="mt-xs font-display-md text-display-md text-primary">Lock in now</h2>
-              <p className="mt-sm max-w-xl font-body-lg text-body-lg text-on-surface-variant">
+              <p className="mt-sm w-full max-w-2xl text-balance font-body-lg text-body-lg leading-relaxed text-on-surface-variant">
                 Close extra tabs, put your phone out of reach, and keep only the task you need for this block.
               </p>
               <div className="mt-lg grid w-full grid-cols-1 gap-sm sm:grid-cols-3">
                 {["One task", "No switching", "Stop when time ends"].map((item) => (
-                  <div key={item} className="rounded-lg border-2 border-primary-fixed-dim bg-white/80 p-sm font-label-md text-label-md">
+                  <div key={item} className="rounded-full border-2 border-primary-fixed-dim bg-white/80 px-md py-sm font-label-md text-label-md">
                     {item}
                   </div>
                 ))}
