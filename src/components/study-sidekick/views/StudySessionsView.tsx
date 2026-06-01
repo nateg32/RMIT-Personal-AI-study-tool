@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ViewHeader from "../components/ViewHeader";
 import type {
@@ -13,6 +13,13 @@ import type {
 } from "../types";
 import { assignmentTypeLabel, compactText, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
 import { xpForFocusMinutes } from "../lib/streak";
+import {
+  clearFocusTimerSnapshot,
+  focusTimerSecondsLeft,
+  isFocusTimerSnapshotVisible,
+  readFocusTimerSnapshot,
+  writeFocusTimerSnapshot,
+} from "../lib/focus-timer";
 
 type StudySessionsViewProps = {
   assignments: AssignmentSummary[];
@@ -459,8 +466,11 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   const [blockDraft, setBlockDraft] = useState({ name: "", minutes: "25", tasks: "", breakMinutes: "" });
   const [checklistDraft, setChecklistDraft] = useState("");
   const completedTimerKeys = useRef(new Set<string>());
+  const publishedCompleteTimerKeys = useRef(new Set<string>());
   const customSessionCountRef = useRef(sessions.filter((session) => !session.assignmentId).length);
   const focusLaunchHandledRef = useRef(false);
+  const focusDraftLaunchKeyRef = useRef<string | null>(null);
+  const focusSnapshotRestoredRef = useRef(false);
 
   const customSessions = useMemo(() => sessions.filter((session) => !session.assignmentId), [sessions]);
   const selectedCustomSession =
@@ -545,6 +555,125 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     setReflectionCustomText("");
     setReflectionMessage(null);
   };
+
+  const focusSessionHref = useCallback(() => {
+    if (typeof window === "undefined") return "/study-sessions";
+    const url = new URL("/study-sessions", window.location.origin);
+    url.searchParams.set("focus", "1");
+    url.searchParams.set("block", String(safeActiveBlockIndex));
+
+    if (activeSession) {
+      url.searchParams.set("sessionId", activeSession.id);
+    } else if (selectedAssignment?.id) {
+      url.searchParams.set("assignmentId", selectedAssignment.id);
+    } else if (selectedCustomSession?.id) {
+      url.searchParams.set("customSessionId", selectedCustomSession.id);
+    } else {
+      const draftKey = focusDraftLaunchKeyRef.current || randomLaunchKey();
+      focusDraftLaunchKeyRef.current = draftKey;
+      const payload: FocusLaunchPayload = {
+        source: sessionSource,
+        assignmentId: selectedAssignment?.id || null,
+        customSessionId: selectedCustomSession?.id || null,
+        plan,
+        activeBlockIndex: safeActiveBlockIndex,
+        duration,
+        createdAt: Date.now(),
+      };
+      window.localStorage.setItem(focusLaunchStorageKey(draftKey), JSON.stringify(payload));
+      url.searchParams.set("draftKey", draftKey);
+    }
+
+    return `${url.pathname}${url.search}`;
+  }, [activeSession, duration, plan, safeActiveBlockIndex, selectedAssignment, selectedCustomSession, sessionSource]);
+
+  const publishFocusTimer = useCallback(
+    (
+      nextTimer: { key: string; secondsLeft: number; running: boolean },
+      nextRunning: boolean,
+      phase: "focus" | "complete" = "focus",
+    ) => {
+      if (typeof window === "undefined") return;
+      const now = Date.now();
+      const safeSecondsLeft = Math.max(0, nextTimer.secondsLeft);
+      const isRunning = nextRunning && safeSecondsLeft > 0;
+      writeFocusTimerSnapshot({
+        id: nextTimer.key,
+        timerKey: nextTimer.key,
+        title: plan.title,
+        blockName: activeBlock?.name || "Focus block",
+        task: activeBlock?.tasks?.[0] ? cleanPlanText(activeBlock.tasks[0], 140) : plan.nextAction,
+        phase,
+        totalSeconds,
+        secondsLeft: safeSecondsLeft,
+        running: isRunning,
+        endsAt: isRunning ? now + safeSecondsLeft * 1000 : null,
+        href: focusSessionHref(),
+        source: sessionSource,
+        sessionId: activeSession?.id || null,
+        assignmentId: selectedAssignment?.id || null,
+        customSessionId: selectedCustomSession?.id || null,
+        activeBlockIndex: safeActiveBlockIndex,
+        updatedAt: now,
+      });
+    },
+    [
+      activeBlock,
+      activeSession,
+      focusSessionHref,
+      plan,
+      safeActiveBlockIndex,
+      selectedAssignment,
+      selectedCustomSession,
+      sessionSource,
+      totalSeconds,
+    ],
+  );
+
+  const publishBreakTimer = useCallback(
+    (seconds: number) => {
+      if (typeof window === "undefined") return;
+      const now = Date.now();
+      const nextBlock = plan.blocks[safeActiveBlockIndex + 1];
+      const safeSecondsLeft = Math.max(0, seconds);
+      const safeTotalSeconds = Math.max(1, safeSecondsLeft || activeBreakMinutes * 60 || 60);
+      writeFocusTimerSnapshot({
+        id: `${timerKey}:break`,
+        timerKey: `${timerKey}:break`,
+        title: plan.title,
+        blockName: isLastBlock ? "Session complete" : "Break time",
+        task: isLastBlock
+          ? "Close the loop and save what you finished."
+          : nextBlock?.tasks?.[0]
+            ? `Next: ${cleanPlanText(nextBlock.tasks[0], 120)}`
+            : "Reset before the next block.",
+        phase: isLastBlock ? "complete" : "break",
+        totalSeconds: safeTotalSeconds,
+        secondsLeft: safeSecondsLeft,
+        running: safeSecondsLeft > 0,
+        endsAt: safeSecondsLeft > 0 ? now + safeSecondsLeft * 1000 : null,
+        href: focusSessionHref(),
+        source: sessionSource,
+        sessionId: activeSession?.id || null,
+        assignmentId: selectedAssignment?.id || null,
+        customSessionId: selectedCustomSession?.id || null,
+        activeBlockIndex: safeActiveBlockIndex,
+        updatedAt: now,
+      });
+    },
+    [
+      activeBreakMinutes,
+      activeSession,
+      focusSessionHref,
+      isLastBlock,
+      plan,
+      safeActiveBlockIndex,
+      selectedAssignment,
+      selectedCustomSession,
+      sessionSource,
+      timerKey,
+    ],
+  );
 
   useEffect(() => {
     if (sessionSource !== "custom") {
@@ -631,6 +760,68 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
   }, [assignments, customSessions, onSelectAssignment, sessions]);
 
   useEffect(() => {
+    if (focusSnapshotRestoredRef.current || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("focus") === "1") return;
+
+    const snapshot = readFocusTimerSnapshot();
+    if (!isFocusTimerSnapshotVisible(snapshot)) return;
+    const secondsLeftFromSnapshot = snapshot ? focusTimerSecondsLeft(snapshot) : 0;
+    const nextTimer = {
+      key: snapshot?.timerKey || "",
+      secondsLeft: secondsLeftFromSnapshot,
+      running: Boolean(snapshot?.running && secondsLeftFromSnapshot > 0),
+    };
+    let restoreTimeout: number | null = null;
+    const scheduleRestore = (applySelection: () => void) => {
+      if (!snapshot) return;
+      focusSnapshotRestoredRef.current = true;
+      restoreTimeout = window.setTimeout(() => {
+        applySelection();
+        setActiveBlockIndex(snapshot.activeBlockIndex);
+        setTimerState(nextTimer);
+      }, 0);
+    };
+
+    if (snapshot?.sessionId) {
+      const matchedSession = sessions.find((session) => session.id === snapshot.sessionId);
+      if (!matchedSession) return;
+      scheduleRestore(() => {
+        if (matchedSession.assignmentId) {
+          setSessionSource("canvas");
+          onSelectAssignment(matchedSession.assignmentId);
+        } else {
+          setSessionSource("custom");
+          setSelectedCustomSessionId(matchedSession.id);
+        }
+      });
+      return () => {
+        if (restoreTimeout) window.clearTimeout(restoreTimeout);
+      };
+    }
+
+    if (snapshot?.assignmentId && assignments.some((assignment) => assignment.id === snapshot.assignmentId)) {
+      scheduleRestore(() => {
+        setSessionSource("canvas");
+        onSelectAssignment(snapshot.assignmentId || null);
+      });
+      return () => {
+        if (restoreTimeout) window.clearTimeout(restoreTimeout);
+      };
+    }
+
+    if (snapshot?.customSessionId && customSessions.some((session) => session.id === snapshot.customSessionId)) {
+      scheduleRestore(() => {
+        setSessionSource("custom");
+        setSelectedCustomSessionId(snapshot.customSessionId || newCustomSessionId);
+      });
+      return () => {
+        if (restoreTimeout) window.clearTimeout(restoreTimeout);
+      };
+    }
+  }, [assignments, customSessions, onSelectAssignment, sessions]);
+
+  useEffect(() => {
     if (!running) return;
     const interval = window.setInterval(() => {
       setTimerState((current) => {
@@ -644,6 +835,12 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     }, 1000);
     return () => window.clearInterval(interval);
   }, [running, timer, timerKey]);
+
+  useEffect(() => {
+    if (secondsLeft !== 0 || publishedCompleteTimerKeys.current.has(timerKey)) return;
+    publishedCompleteTimerKeys.current.add(timerKey);
+    publishFocusTimer({ ...timer, secondsLeft: 0, running: false }, false, "complete");
+  }, [publishFocusTimer, secondsLeft, timer, timerKey]);
 
   useEffect(() => {
     if (focusStage !== "break" || breakSecondsLeft <= 0) return;
@@ -666,12 +863,14 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     ).catch(() => undefined);
     if (focusFullscreen) {
       window.setTimeout(() => {
+        const nextBreakSeconds = isLastBlock ? 0 : Math.max(60, activeBreakMinutes * 60);
         setReflectionSelected([]);
         setReflectionCustomText("");
         setReflectionMessage(null);
         setFocusStage("break");
         setBreakMode("breathe");
-        setBreakSecondsLeft(isLastBlock ? 0 : Math.max(60, activeBreakMinutes * 60));
+        setBreakSecondsLeft(nextBreakSeconds);
+        publishBreakTimer(nextBreakSeconds);
         setMemoryInput([]);
         setMemoryRound(1);
         setMemoryPattern(buildMemoryPattern());
@@ -684,6 +883,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     isLastBlock,
     onUpdateSession,
     plan,
+    publishBreakTimer,
     safeActiveBlockIndex,
     secondsLeft,
     timerKey,
@@ -750,6 +950,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
     setShowPlanEditor(false);
     const nextSeconds = Math.max(60, (plan.blocks[index]?.minutes || duration) * 60);
     setActiveBlockIndex(index);
+    clearFocusTimerSnapshot();
     setTimerState({
       key: `${activeSession?.id || selectedAssignment?.id || "draft"}:${index}:${nextSeconds}`,
       secondsLeft: nextSeconds,
@@ -837,6 +1038,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
   const toggleTimer = () => {
     if (actionsDisabled) return;
+    const nextRunning = !running;
     if (!running && activeSession) {
       void onUpdateSession(
         activeSession.id,
@@ -847,11 +1049,14 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
         "in_progress",
       ).catch(() => undefined);
     }
-    setTimerState({ ...timer, running: !running });
+    const nextTimer = { ...timer, running: nextRunning };
+    setTimerState(nextTimer);
+    publishFocusTimer(nextTimer, nextRunning);
   };
 
   const startFocusTimer = () => {
     if (actionsDisabled) return;
+    publishedCompleteTimerKeys.current.delete(timerKey);
     if (activeSession) {
       void onUpdateSession(
         activeSession.id,
@@ -863,7 +1068,9 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
       ).catch(() => undefined);
     }
     setFocusStage("focus");
-    setTimerState({ ...timer, running: true });
+    const nextTimer = { ...timer, running: true };
+    setTimerState(nextTimer);
+    publishFocusTimer(nextTimer, true);
   };
 
   const openFocusPreview = () => {
@@ -874,16 +1081,20 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
 
   const resetTimer = () => {
     completedTimerKeys.current.delete(timerKey);
+    publishedCompleteTimerKeys.current.delete(timerKey);
+    clearFocusTimerSnapshot();
     setTimerState({ key: timerKey, secondsLeft: totalSeconds, running: false });
   };
 
   const continueAfterBreak = async () => {
     if (isLastBlock) {
+      clearFocusTimerSnapshot();
       setFocusFullscreen(false);
       setFocusStage("brief");
       return;
     }
     await selectBlock(safeActiveBlockIndex + 1);
+    clearFocusTimerSnapshot();
     setBreakSecondsLeft(0);
     setFocusStage("brief");
     setMemoryInput([]);

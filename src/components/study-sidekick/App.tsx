@@ -14,6 +14,7 @@ import FocusStreakView from "./views/FocusStreakView";
 import AiChatView, { type ChatMessage } from "./views/AiChatView";
 import SettingsView from "./views/SettingsView";
 import SupportView from "./views/SupportView";
+import FocusMiniTimer from "./components/FocusMiniTimer";
 import type {
   ActiveOperation,
   AnnouncementSummary,
@@ -1115,6 +1116,7 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
             </div>
           </button>
         ) : null}
+        <FocusMiniTimer onOpen={() => setActiveView("sessions")} />
         {loading ? (
           <div className="min-h-screen flex items-center justify-center p-lg">
             <div className="sticky-note-mint p-lg rounded-lg bubbly-shadow text-center">
