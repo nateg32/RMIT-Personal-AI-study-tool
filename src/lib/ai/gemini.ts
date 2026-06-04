@@ -87,6 +87,87 @@ function geminiModelCandidates() {
   );
 }
 
+export function getGeminiModelCandidates() {
+  return geminiModelCandidates();
+}
+
+function classifyGeminiError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes("api_key_invalid") || lower.includes("api key not valid")) {
+    return "invalid_api_key";
+  }
+
+  if (
+    lower.includes("permission_denied") ||
+    lower.includes("dunning") ||
+    lower.includes("billing") ||
+    lower.includes("\"code\":403")
+  ) {
+    return "permission_or_billing";
+  }
+
+  if (lower.includes("not found") || lower.includes("not supported") || lower.includes("not available")) {
+    return "model_unavailable";
+  }
+
+  if (lower.includes("quota") || lower.includes("rate limit") || lower.includes("resource_exhausted")) {
+    return "quota_or_rate_limit";
+  }
+
+  return "request_failed";
+}
+
+export async function checkGeminiConnection() {
+  const ai = gemini();
+  const candidates = geminiModelCandidates();
+
+  if (!ai) {
+    return {
+      configured: false,
+      ok: false,
+      candidates,
+      attempts: candidates.map((model) => ({ model, ok: false, reason: "missing_api_key" })),
+    };
+  }
+
+  const attempts: Array<{ model: string; ok: boolean; reason?: string }> = [];
+
+  for (const model of candidates) {
+    try {
+      await ai.models.generateContent({
+        model,
+        contents: "Reply with OK only.",
+      });
+      attempts.push({ model, ok: true });
+      return {
+        configured: true,
+        ok: true,
+        model,
+        candidates,
+        attempts,
+      };
+    } catch (error) {
+      const reason = classifyGeminiError(error);
+      attempts.push({ model, ok: false, reason });
+      console.error("[gemini.status] model attempt failed", {
+        model,
+        hasApiKey: Boolean(env.GEMINI_API_KEY),
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    configured: true,
+    ok: false,
+    candidates,
+    attempts,
+  };
+}
+
 async function generateContentWithFallback(ai: GoogleGenAI, input: Omit<GenerateContentInput, "model">) {
   let lastError: unknown = null;
 
@@ -742,6 +823,7 @@ ${facts}
   } catch (error) {
     console.error("[gemini.chat] request failed", {
       model: env.GEMINI_MODEL,
+      modelCandidates: geminiModelCandidates(),
       hasApiKey: Boolean(env.GEMINI_API_KEY),
       mediaMaterialCount: input.mediaMaterials?.length || 0,
       assignmentContextCount: input.assignmentContexts.length,
