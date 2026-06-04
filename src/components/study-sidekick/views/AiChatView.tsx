@@ -214,6 +214,168 @@ function previousUserMessage(messages: ChatMessage[], index: number) {
   return "";
 }
 
+function cleanMarkdownText(value: string) {
+  return value
+    .replace(/^#{1,6}\s+/g, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+$/g, "")
+    .trim();
+}
+
+function renderInlineText(value: string) {
+  const clean = cleanMarkdownText(value);
+  const parts: Array<string | { label: string; url: string }> = [];
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkPattern.exec(clean))) {
+    if (match.index > lastIndex) parts.push(clean.slice(lastIndex, match.index));
+    parts.push({ label: match[1], url: match[2] });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < clean.length) parts.push(clean.slice(lastIndex));
+
+  return parts.map((part, index) =>
+    typeof part === "string" ? (
+      <span key={`${part}-${index}`}>{part}</span>
+    ) : (
+      <a
+        key={`${part.url}-${index}`}
+        href={part.url}
+        target="_blank"
+        rel="noreferrer"
+        className="font-bold text-primary underline decoration-primary/30 underline-offset-4 hover:decoration-primary"
+      >
+        {part.label}
+      </a>
+    ),
+  );
+}
+
+function lineKind(line: string) {
+  if (/^\s*(?:[-*]|•)\s+/.test(line)) return "bullet";
+  if (/^\s*\d+\.\s+/.test(line)) return "number";
+  return "text";
+}
+
+function lineBody(line: string) {
+  return line
+    .replace(/^\s*(?:[-*]|•)\s+/, "")
+    .replace(/^\s*\d+\.\s+/, "");
+}
+
+function isHeadingLine(line: string, nextLine?: string) {
+  const clean = cleanMarkdownText(line);
+  if (!clean) return false;
+  if (/^#{1,6}\s+/.test(line)) return true;
+  if (clean.length <= 64 && /:$/.test(clean) && nextLine && lineKind(nextLine) !== "text") return true;
+  return false;
+}
+
+function ChatFormattedMessage({ content }: { content: string }) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const nodes = [];
+  let cursor = 0;
+
+  while (cursor < lines.length) {
+    const rawLine = lines[cursor] || "";
+    const line = rawLine.trim();
+    const nextLine = lines[cursor + 1]?.trim();
+
+    if (!line) {
+      cursor += 1;
+      continue;
+    }
+
+    if (isHeadingLine(rawLine, nextLine)) {
+      nodes.push({
+        type: "heading" as const,
+        text: cleanMarkdownText(line).replace(/:$/, ""),
+      });
+      cursor += 1;
+      continue;
+    }
+
+    const kind = lineKind(rawLine);
+    if (kind !== "text") {
+      const items: string[] = [];
+      const ordered = kind === "number";
+      while (cursor < lines.length && lineKind(lines[cursor] || "") === kind) {
+        items.push(lineBody(lines[cursor] || ""));
+        cursor += 1;
+      }
+      nodes.push({ type: ordered ? ("ordered" as const) : ("bullets" as const), items });
+      continue;
+    }
+
+    const paragraph: string[] = [];
+    while (
+      cursor < lines.length &&
+      lines[cursor]?.trim() &&
+      lineKind(lines[cursor] || "") === "text" &&
+      !isHeadingLine(lines[cursor] || "", lines[cursor + 1]?.trim())
+    ) {
+      paragraph.push(lines[cursor] || "");
+      cursor += 1;
+    }
+    nodes.push({ type: "paragraph" as const, text: paragraph.join(" ") });
+  }
+
+  return (
+    <div className="space-y-md whitespace-normal font-body-md text-body-md leading-relaxed">
+      {nodes.map((node, index) => {
+        if (node.type === "heading") {
+          return (
+            <div key={`${node.type}-${index}`} className="pt-xs">
+              <p className="font-label-lg text-label-lg font-bold uppercase tracking-[0.08em] text-primary">
+                {renderInlineText(node.text)}
+              </p>
+            </div>
+          );
+        }
+
+        if (node.type === "ordered") {
+          return (
+            <div key={`${node.type}-${index}`} className="grid gap-sm">
+              {node.items.map((item, itemIndex) => (
+                <div
+                  key={`${item}-${itemIndex}`}
+                  className="flex gap-sm rounded-lg border border-primary-fixed-dim bg-white/50 px-sm py-sm"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-on-primary font-label-md text-label-md">
+                    {itemIndex + 1}
+                  </span>
+                  <p className="min-w-0 flex-1">{renderInlineText(item)}</p>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        if (node.type === "bullets") {
+          return (
+            <div key={`${node.type}-${index}`} className="grid gap-xs">
+              {node.items.map((item, itemIndex) => (
+                <div key={`${item}-${itemIndex}`} className="flex gap-sm">
+                  <span className="material-symbols-outlined mt-0.5 text-[18px] text-primary">check_circle</span>
+                  <p className="min-w-0 flex-1">{renderInlineText(item)}</p>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        return <p key={`${node.type}-${index}`}>{renderInlineText("text" in node ? (node.text ?? "") : "")}</p>;
+      })}
+    </div>
+  );
+}
+
 function SidekickWorking({ userMessage, startedAt }: { userMessage?: string; startedAt: number }) {
   const workflow = thinkingWorkflow(userMessage);
   const [now, setNow] = useState(() => Date.now());
@@ -459,7 +621,7 @@ export default function AiChatView({
                   </div>
                 ) : null}
                 <div
-                  className={`p-md bubbly-shadow whitespace-pre-wrap ${
+                  className={`p-md bubbly-shadow whitespace-normal ${
                     message.role === "user"
                       ? "bg-[#FFEBE6] rounded-tl-xl rounded-b-xl border-2 border-[#FFC7B8] max-w-[85%] text-[#532D23]"
                       : message.provider === "agent"
@@ -469,8 +631,10 @@ export default function AiChatView({
                 >
                   {isThinkingMessage(message) ? (
                     <SidekickWorking userMessage={previousUserMessage(messages, index)} startedAt={message.createdAt} />
+                  ) : message.role === "assistant" ? (
+                    <ChatFormattedMessage content={message.content} />
                   ) : (
-                    <p className="font-body-md text-body-md">{message.content}</p>
+                    <p className="font-body-md text-body-md whitespace-pre-wrap">{message.content}</p>
                   )}
                   {message.role === "assistant" && message.provider ? (
                     <p className="mt-sm font-label-sm text-label-sm opacity-70">
