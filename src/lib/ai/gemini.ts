@@ -706,7 +706,15 @@ ${facts}
       provider: "gemini" as const,
       model: env.GEMINI_MODEL,
     };
-  } catch {
+  } catch (error) {
+    console.error("[gemini.chat] request failed", {
+      model: env.GEMINI_MODEL,
+      hasApiKey: Boolean(env.GEMINI_API_KEY),
+      mediaMaterialCount: input.mediaMaterials?.length || 0,
+      assignmentContextCount: input.assignmentContexts.length,
+      dueCount: input.due.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return {
       answer: fallbackChatAnswer(input),
       provider: "fallback" as const,
@@ -739,24 +747,29 @@ function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) 
   const firstContext = input.assignmentContexts[0];
   const topAssignments = input.due.slice(0, 6);
   const lastSync = input.lastSyncAt || "never";
+  const fallbackNote =
+    "Quick note: Gemini is unavailable for this request, so I used the saved Canvas facts and local priority rules.";
   const asksForPriority =
     /(due|deadline|week|today|tomorrow|overdue|focus|priority|urgent|first|next|order|what should)/i.test(message);
 
   if (topAssignments.length && asksForPriority) {
     const ordered = topAssignments.map((assignment, index) => `${index + 1}. ${assignmentLine(assignment)}`).join("\n");
     const announcementLine = input.announcements.length
-      ? `A few recent announcements worth checking:\n${input.announcements.slice(0, 4).map((item) => `- ${item}`).join("\n")}`
+      ? `Recent announcements worth checking:\n${input.announcements.slice(0, 4).map((item) => `- ${item}`).join("\n")}`
       : "I do not see recent announcements in the current dashboard context.";
-    const fileLine = input.files.length
-      ? `Useful files/materials I can see:\n${input.files.slice(0, 6).map((item) => `- ${item}`).join("\n")}`
+    const usefulFiles = input.files
+      .filter((item) => !/no indexed text stored/i.test(item))
+      .slice(0, 5);
+    const fileLine = usefulFiles.length
+      ? `Useful files/materials I can see:\n${usefulFiles.map((item) => `- ${item}`).join("\n")}`
       : "I do not see Canvas files or manual uploads indexed yet.";
 
     return [
-      "Yep. Here is the safest order I would look at right now:",
+      "Yep. Here is the safest order I would check right now:",
       ordered,
       announcementLine,
       fileLine,
-      `One caveat: I am using the local fallback answer because Gemini was not available for this request. Last sync: ${lastSync}.`,
+      `${fallbackNote} Last sync: ${lastSync}.`,
     ].join("\n\n");
   }
 
@@ -784,7 +797,7 @@ function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) 
       `Marking/rubric clues I can see:\n${rubric}`,
       resources ? `Open these first:\n${resources}` : "I could not find related files or module resources in the latest sync.",
       firstContext.missingContext.length ? `What I still do not have: ${firstContext.missingContext.join(" ")}` : null,
-      `Last sync: ${lastSync}.`,
+      `${fallbackNote} Last sync: ${lastSync}.`,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -804,8 +817,7 @@ function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) 
       ordered,
       announcementLine,
       fileLine,
-      "I am using the local priority algorithm because Gemini was not available for this request. I will still avoid inventing Canvas facts.",
-      `Last sync: ${lastSync}.`,
+      `${fallbackNote} Last sync: ${lastSync}.`,
     ].join("\n\n");
   }
 
@@ -814,7 +826,7 @@ function fallbackChatAnswer(input: Parameters<typeof chatWithCanvasContext>[0]) 
       "Here are the files and manual materials I can see right now:",
       input.files.slice(0, 10).map((item, index) => `${index + 1}. ${item}`).join("\n"),
       "Ask me about one by name and I will connect it to the closest assignment context I can find.",
-      `Last sync: ${lastSync}.`,
+      `${fallbackNote} Last sync: ${lastSync}.`,
     ].join("\n\n");
   }
 

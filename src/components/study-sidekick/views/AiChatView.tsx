@@ -478,7 +478,7 @@ export default function AiChatView({
                         ? `Gemini${message.model ? ` (${message.model})` : ""}`
                         : message.provider === "agent"
                           ? "Study Agent"
-                      : "Deterministic fallback"}
+                          : "Grounded quick answer"}
                     </p>
                   ) : null}
                   {message.role === "assistant" && message.confirmation ? (

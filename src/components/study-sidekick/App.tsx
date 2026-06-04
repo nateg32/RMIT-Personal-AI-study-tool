@@ -1151,8 +1151,8 @@ export default function App({ initialView = "dashboard" }: { initialView?: ViewT
           : payload.provider === "gemini"
             ? `Using Gemini ${payload.model || ""}`.trim()
             : payload.reason
-              ? `Using grounded fallback: ${payload.reason}`
-              : "Using grounded fallback",
+              ? `Using saved Canvas facts: ${payload.reason}`
+              : "Using saved Canvas facts",
       );
       setChatMessages((current) =>
         current.map((item) =>
