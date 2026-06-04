@@ -26,7 +26,7 @@ Required variables:
 - `ENCRYPTION_KEY`
 - `CRON_SECRET`
 - `GEMINI_API_KEY` if AI generation is enabled
-- `GEMINI_MODEL` defaults to `gemini-3.1-pro-preview`
+- `GEMINI_MODEL` defaults to `gemini-2.5-flash`; `GEMINI_FALLBACK_MODELS` defaults to `gemini-2.5-flash,gemini-2.5-flash-lite`
 - `CANVAS_BASE_URL`
 - `RESEND_API_KEY` if Support Desk ticket emails should be sent
 - `SUPPORT_FROM_EMAIL` defaults to `Study Sidekick <support@creatorbot.app>`

@@ -34,7 +34,7 @@ cp .env.example .env.local
 - `ALLOWED_EMAILS`
 - `ENCRYPTION_KEY`
 - optional `GEMINI_API_KEY`
-- optional `GEMINI_MODEL` defaults to `gemini-3.1-pro-preview`
+- optional `GEMINI_MODEL` defaults to `gemini-2.5-flash`; optional `GEMINI_FALLBACK_MODELS` defaults to `gemini-2.5-flash,gemini-2.5-flash-lite`
 - optional local-only `CANVAS_ACCESS_TOKEN`
 - optional `RESEND_API_KEY` for Support Desk tickets
 - optional `SUPPORT_FROM_EMAIL` and `SUPPORT_TO_EMAIL`, defaulting to `Study Sidekick <support@creatorbot.app>` and `support@creatorbot.app`

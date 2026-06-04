@@ -71,6 +71,42 @@ function gemini() {
   return new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 }
 
+type GenerateContentInput = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
+
+const defaultFallbackModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+
+function geminiModelCandidates() {
+  return Array.from(
+    new Set(
+      [
+        env.GEMINI_MODEL,
+        ...(env.GEMINI_FALLBACK_MODELS || "").split(",").map((model) => model.trim()),
+        ...defaultFallbackModels,
+      ].filter(Boolean),
+    ),
+  );
+}
+
+async function generateContentWithFallback(ai: GoogleGenAI, input: Omit<GenerateContentInput, "model">) {
+  let lastError: unknown = null;
+
+  for (const model of geminiModelCandidates()) {
+    try {
+      const response = await ai.models.generateContent({ ...input, model });
+      return { response, model };
+    } catch (error) {
+      lastError = error;
+      console.error("[gemini] model attempt failed", {
+        model,
+        hasApiKey: Boolean(env.GEMINI_API_KEY),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  throw lastError || new Error("Gemini request failed for all configured models");
+}
+
 function safeParseJson(text: string) {
   const trimmed = text.trim().replace(/^```json\s*/i, "").replace(/```$/i, "");
   return JSON.parse(trimmed);
@@ -497,8 +533,7 @@ If context confidence is low and there are no user-provided notes, set needsUser
 `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: env.GEMINI_MODEL,
+    const { response } = await generateContentWithFallback(ai, {
       contents: contentsWithMedia(prompt, input.mediaMaterials),
       config: {
         responseMimeType: "application/json",
@@ -624,8 +659,7 @@ Return fields: greeting, summary, riskLevel, focusItems, dueToday, dueThisWeek, 
 `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: env.GEMINI_MODEL,
+    const { response } = await generateContentWithFallback(ai, {
       contents: prompt,
       config: { responseMimeType: "application/json" },
     });
@@ -664,8 +698,7 @@ export async function chatWithCanvasContext(input: {
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: env.GEMINI_MODEL,
+    const { response, model } = await generateContentWithFallback(ai, {
       contents: contentsWithMedia(`
 You are Sidekick, a calm Canvas-aware study assistant for a university student.
 Sound human, specific, and easygoing. Lead with the useful answer, then give the evidence.
@@ -704,7 +737,7 @@ ${facts}
     return {
       answer: response.text || fallbackChatAnswer(input),
       provider: "gemini" as const,
-      model: env.GEMINI_MODEL,
+      model,
     };
   } catch (error) {
     console.error("[gemini.chat] request failed", {
