@@ -2,11 +2,12 @@ import { z } from "zod";
 import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { CanvasClient } from "@/lib/canvas/client";
+import { normaliseCanvasBaseUrl } from "@/lib/canvas/url";
 import { getDb } from "@/lib/db";
 import { cleanPersonName } from "@/lib/display";
+import { getCanvasAllowedHosts } from "@/lib/env";
 import { requireUser } from "@/lib/auth";
 import { encryptSecret } from "@/lib/security/crypto";
-import { normaliseBaseUrl } from "@/lib/utils";
 
 const connectSchema = z.object({
   canvasBaseUrl: z.string().url(),
@@ -17,8 +18,9 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser();
     const input = await parseJson(request, connectSchema);
-    const canvasBaseUrl = normaliseBaseUrl(input.canvasBaseUrl);
-    const client = new CanvasClient({ baseUrl: canvasBaseUrl, token: input.accessToken });
+    const allowedHosts = getCanvasAllowedHosts();
+    const canvasBaseUrl = normaliseCanvasBaseUrl(input.canvasBaseUrl, { allowedHosts });
+    const client = new CanvasClient({ baseUrl: canvasBaseUrl, token: input.accessToken, allowedHosts });
     const canvasUser = await client.getCurrentUser();
     const encrypted = encryptSecret(input.accessToken);
     const db = getDb();

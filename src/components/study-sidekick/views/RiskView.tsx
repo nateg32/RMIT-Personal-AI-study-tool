@@ -13,6 +13,7 @@ import {
   riskTone,
   statusLabel,
 } from "../lib/client-utils";
+import { openExternalUrl } from "../lib/safe-url";
 
 type RiskViewProps = {
   assignments: AssignmentSummary[];
@@ -210,7 +211,7 @@ export default function RiskView({
                             <button
                               type="button"
                               className="bubbly-button rounded-full border-2 border-surface-variant bg-white px-md py-xs font-label-md text-label-md text-on-surface"
-                              onClick={() => window.open(assignment.htmlUrl || undefined, "_blank", "noopener,noreferrer")}
+                              onClick={() => openExternalUrl(assignment.htmlUrl)}
                             >
                               Canvas
                             </button>

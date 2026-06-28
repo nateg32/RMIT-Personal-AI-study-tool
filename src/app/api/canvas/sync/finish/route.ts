@@ -3,6 +3,7 @@ import { auditLog } from "@/lib/audit";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { finishCanvasSyncForUser } from "@/lib/canvas/sync";
+import { redactSecret } from "@/lib/utils";
 
 export const maxDuration = 30;
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
         userId: user.id,
         action: "canvas.sync_failed",
         metadata: {
-          error: error instanceof Error ? error.message : "Unknown Canvas sync finish error",
+          error: redactSecret(error instanceof Error ? error.message : "Unknown Canvas sync finish error"),
         },
       });
     }

@@ -1,4 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { getCanvasAllowedHosts } from "@/lib/env";
+import { normaliseCanvasBaseUrl, resolveCanvasApiUrl } from "@/lib/canvas/url";
 import { redactSecret } from "@/lib/utils";
 
 type Fetcher = typeof fetch;
@@ -118,14 +120,17 @@ export class CanvasClient {
   private readonly token: string;
   private readonly fetcher: Fetcher;
   private readonly timeoutMs: number;
+  private readonly allowedHosts: string[];
 
   constructor(input: {
     baseUrl: string;
     token: string;
     fetcher?: Fetcher;
     timeoutMs?: number;
+    allowedHosts?: string[];
   }) {
-    this.baseUrl = input.baseUrl.replace(/\/$/, "");
+    this.allowedHosts = input.allowedHosts?.length ? input.allowedHosts : getCanvasAllowedHosts();
+    this.baseUrl = normaliseCanvasBaseUrl(input.baseUrl, { allowedHosts: this.allowedHosts });
     this.token = normalizeAccessToken(input.token);
     this.fetcher = input.fetcher || fetch;
     this.timeoutMs = input.timeoutMs || 20_000;
@@ -250,8 +255,7 @@ export class CanvasClient {
   }
 
   private toUrl(pathOrUrl: string) {
-    if (pathOrUrl.startsWith("http")) return pathOrUrl;
-    return `${this.baseUrl}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    return resolveCanvasApiUrl(pathOrUrl, this.baseUrl, { allowedHosts: this.allowedHosts });
   }
 
   private getNextLink(header: string | null) {

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { CourseSummary, FileSummary, StudySidekickActions } from "../types";
 import { fileSizeLabel, formatDateOnly } from "../lib/client-utils";
+import { openExternalUrl } from "../lib/safe-url";
 
 type FilesViewProps = {
   files: FileSummary[];
@@ -21,10 +22,6 @@ function fileIcon(contentType?: string | null) {
   if (contentType?.includes("spreadsheet") || contentType?.includes("excel")) return "table_chart";
   if (contentType?.includes("presentation")) return "slideshow";
   return "description";
-}
-
-function openCanvas(url?: string | null) {
-  if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function wordCount(value: string) {
@@ -134,7 +131,7 @@ export default function FilesView({ files, courses, actions }: FilesViewProps) {
 
   const openFile = (file: FileSummary) => {
     if (file.url) {
-      openCanvas(file.url);
+      openExternalUrl(file.url);
       return;
     }
     actions.onOpenChat(`Use my uploaded material "${file.name}" to help me plan what to study.`);

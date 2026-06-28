@@ -10,4 +10,12 @@ describe("secret encryption", () => {
     expect(decryptSecret(encrypted)).toBe("canvas-token-value");
     vi.unstubAllEnvs();
   });
+
+  it("rejects weak encryption keys instead of hashing them silently", async () => {
+    vi.stubEnv("ENCRYPTION_KEY", "short-key");
+    vi.resetModules();
+    const { encryptSecret } = await import("@/lib/security/crypto");
+    expect(() => encryptSecret("canvas-token-value")).toThrow(/32 random bytes.*base64/i);
+    vi.unstubAllEnvs();
+  });
 });

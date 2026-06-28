@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { AssignmentSummary, CourseSummary, StudySidekickActions } from "../types";
 import { assignmentTypeLabel, compactText, estimateEffort, formatDate, formatRelative, isSubmitted, riskForAssignment, riskTone, statusLabel } from "../lib/client-utils";
+import { openExternalUrl } from "../lib/safe-url";
 
 type AssignmentsViewProps = {
   assignments: AssignmentSummary[];
@@ -18,10 +19,6 @@ type AssignmentsViewProps = {
 };
 
 type FilterMode = "due" | "submitted" | "unsubmitted" | "all";
-
-function openCanvas(url?: string | null) {
-  if (url) window.open(url, "_blank", "noopener,noreferrer");
-}
 
 export default function AssignmentsView({
   assignments,
@@ -221,7 +218,7 @@ export default function AssignmentsView({
                   <button
                     type="button"
                     className="flex items-center justify-center gap-xs rounded-full bg-white/50 px-md py-sm font-label-md text-label-md transition-all hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={() => openCanvas(assignment.htmlUrl)}
+                    onClick={() => openExternalUrl(assignment.htmlUrl)}
                     aria-label="Open in Canvas"
                   >
                     <span className="material-symbols-outlined text-[18px]">open_in_new</span>

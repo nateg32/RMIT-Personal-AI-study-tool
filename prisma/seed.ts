@@ -4,14 +4,14 @@ const prisma = new PrismaClient();
 
 async function main() {
   const user = await prisma.user.upsert({
-    where: { email: "s4169571@student.rmit.edu.au" },
+    where: { email: "student@example.com" },
     create: {
-      email: "s4169571@student.rmit.edu.au",
-      name: "Nathaniel Kipkogey Gaitho",
+      email: "student@example.com",
+      name: "Demo Student",
       timezone: "Australia/Sydney",
     },
     update: {
-      name: "Nathaniel Kipkogey Gaitho",
+      name: "Demo Student",
       timezone: "Australia/Sydney",
     },
   });

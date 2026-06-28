@@ -21,7 +21,7 @@ function getAuthErrorMessage() {
 
 export function LoginForm() {
   const [message, setMessage] = useState(() => getAuthErrorMessage());
-  const [email, setEmail] = useState("s4169571@student.rmit.edu.au");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -74,7 +74,7 @@ export function LoginForm() {
           className="h-12 rounded-lg px-md text-body-md"
           name="email"
           type="email"
-          placeholder="s4169571@student.rmit.edu.au"
+          placeholder="student@example.com"
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}

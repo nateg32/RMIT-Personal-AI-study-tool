@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, parseJson } from "@/lib/api";
-import { env, getAllowedEmails } from "@/lib/env";
+import { env, getAllowedEmails, isDemoModeEnabled } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const loginSchema = z.object({
@@ -23,6 +23,9 @@ export async function POST(request: Request) {
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
+      if (!isDemoModeEnabled()) {
+        return jsonError(new Error("Supabase auth is not configured"), 503);
+      }
       return jsonOk({
         ok: true,
         demo: true,

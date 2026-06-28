@@ -31,7 +31,7 @@ const cyber: AssignmentSummary = {
 };
 
 const dashboard: DashboardSummary = {
-  userName: "Nathaniel",
+  userName: "Demo Student",
   timezone: "Australia/Sydney",
   stale: false,
   todayMission: [

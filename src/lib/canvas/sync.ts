@@ -1,17 +1,18 @@
 import { createHash } from "node:crypto";
 import { Prisma, type User } from "@prisma/client";
 import { CanvasClient, type CanvasAnnouncement, type CanvasSubmission } from "@/lib/canvas/client";
+import { normaliseCanvasBaseUrl } from "@/lib/canvas/url";
 import { getDb } from "@/lib/db";
 import { cleanPersonName } from "@/lib/display";
-import { env, requireEnv } from "@/lib/env";
+import { env, getCanvasAllowedHosts, requireEnv } from "@/lib/env";
 import { decryptSecret } from "@/lib/security/crypto";
 import { stripCanvasHtml } from "@/lib/security/html";
-import { normaliseBaseUrl } from "@/lib/utils";
 import {
   getDashboardPreferences,
   isCanvasAssignmentVisible,
   isCourseVisible,
 } from "@/lib/data/preferences";
+import { redactSecret } from "@/lib/utils";
 
 export type ChangeEvent = {
   type: string;
@@ -162,10 +163,12 @@ export async function getCanvasClientForUser(user: User, options?: { timeoutMs?:
   }
 
   if (env.CANVAS_ACCESS_TOKEN && env.CANVAS_BASE_URL) {
+    const allowedHosts = getCanvasAllowedHosts();
     return new CanvasClient({
-      baseUrl: normaliseBaseUrl(env.CANVAS_BASE_URL),
+      baseUrl: normaliseCanvasBaseUrl(env.CANVAS_BASE_URL, { allowedHosts }),
       token: env.CANVAS_ACCESS_TOKEN,
       timeoutMs,
+      allowedHosts,
     });
   }
 
@@ -238,7 +241,7 @@ export async function prepareCanvasSyncForUser(user: User) {
       where: { userId: user.id },
       data: {
         syncStatus: "error",
-        syncError: error instanceof Error ? error.message.slice(0, 500) : "Unknown sync error",
+        syncError: redactSecret(error instanceof Error ? error.message : "Unknown sync error").slice(0, 500),
       },
     });
     throw error;
@@ -463,7 +466,7 @@ export async function syncCanvasCourseForUser(
     const courseAnnouncements = await client.getCourseAnnouncements(canvasCourseId).catch((error) => {
       warnings.push(
         `${course.name}: announcements failed - ${
-          error instanceof Error ? error.message.slice(0, 120) : "unknown Canvas error"
+          redactSecret(error instanceof Error ? error.message : "unknown Canvas error").slice(0, 120)
         }`,
       );
       return [];
@@ -488,7 +491,7 @@ export async function syncCanvasCourseForUser(
 
     const files = await client.getCourseFiles(canvasCourseId, MAX_CANVAS_FILES_PER_COURSE).catch((error) => {
       warnings.push(
-        `${course.name}: files failed - ${error instanceof Error ? error.message.slice(0, 120) : "unknown Canvas error"}`,
+        `${course.name}: files failed - ${redactSecret(error instanceof Error ? error.message : "unknown Canvas error").slice(0, 120)}`,
       );
       return [];
     });
@@ -531,7 +534,7 @@ export async function syncCanvasCourseForUser(
       ? await client.getCourseModulesWithItems(canvasCourseId, MAX_CANVAS_MODULES_PER_COURSE).catch((error) => {
           warnings.push(
             `${course.name}: modules failed - ${
-              error instanceof Error ? error.message.slice(0, 120) : "unknown Canvas error"
+              redactSecret(error instanceof Error ? error.message : "unknown Canvas error").slice(0, 120)
             }`,
           );
           return [];
@@ -616,13 +619,14 @@ export async function syncCanvasCourseForUser(
 
 export async function finishCanvasSyncForUser(user: User, input?: { syncError?: string | null }) {
   const db = getDb();
-  const hasError = Boolean(input?.syncError);
+  const safeSyncError = input?.syncError ? redactSecret(input.syncError).slice(0, 500) : null;
+  const hasError = Boolean(safeSyncError);
   const finishedAt = new Date();
 
   await db.canvasConnection.updateMany({
     where: { userId: user.id },
     data: hasError
-      ? { syncStatus: "error", syncError: input?.syncError?.slice(0, 500) || "Canvas sync failed" }
+      ? { syncStatus: "error", syncError: safeSyncError || "Canvas sync failed" }
       : { lastSyncAt: finishedAt, syncStatus: "ok", syncError: null },
   });
 
@@ -630,7 +634,7 @@ export async function finishCanvasSyncForUser(user: User, input?: { syncError?: 
     ok: !hasError,
     mode: "batch_finish" as const,
     syncedAt: hasError ? null : finishedAt.toISOString(),
-    syncError: input?.syncError || null,
+    syncError: safeSyncError,
   };
 }
 
@@ -647,7 +651,7 @@ export async function syncCanvasForUser(user: User, options: CanvasSyncOptions =
       changes.push(...summary.changes);
       warnings.push(...summary.warnings);
     } catch (error) {
-      warnings.push(`${course.name}: ${error instanceof Error ? error.message.slice(0, 160) : "sync failed"}`);
+      warnings.push(`${course.name}: ${redactSecret(error instanceof Error ? error.message : "sync failed").slice(0, 160)}`);
     }
   }
 
@@ -670,8 +674,9 @@ export async function syncCanvasForUser(user: User, options: CanvasSyncOptions =
 }
 
 export function requireCanvasEnvToken() {
+  const allowedHosts = getCanvasAllowedHosts();
   return {
-    baseUrl: normaliseBaseUrl(env.CANVAS_BASE_URL || "https://rmit.instructure.com"),
+    baseUrl: normaliseCanvasBaseUrl(env.CANVAS_BASE_URL || "https://rmit.instructure.com", { allowedHosts }),
     token: requireEnv("CANVAS_ACCESS_TOKEN"),
   };
 }

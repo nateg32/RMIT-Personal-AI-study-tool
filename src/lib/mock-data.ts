@@ -1,7 +1,7 @@
 import type { DashboardSummary } from "@/lib/types";
 
 export const demoDashboard: DashboardSummary = {
-  userName: "Nathaniel",
+  userName: "Demo Student",
   timezone: "Australia/Sydney",
   lastSyncAt: null,
   lastSuccessfulSyncAt: null,

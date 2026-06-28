@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { isProductionRuntime } from "@/lib/env";
 import { redactSecret } from "@/lib/utils";
 
 export function jsonOk<T>(data: T, init?: ResponseInit) {
@@ -7,6 +8,10 @@ export function jsonOk<T>(data: T, init?: ResponseInit) {
 }
 
 export function jsonError(error: unknown, status = 500) {
+  if (isProductionRuntime() && status >= 500) {
+    return NextResponse.json({ error: "Unexpected error" }, { status });
+  }
+
   const message =
     error instanceof ZodError
       ? "Invalid request"

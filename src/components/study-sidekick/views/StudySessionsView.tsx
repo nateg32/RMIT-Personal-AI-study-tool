@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import { assignmentTypeLabel, compactText, formatDate, isSubmitted, riskForAssignment, statusLabel } from "../lib/client-utils";
 import { xpForFocusMinutes } from "../lib/streak";
+import { openExternalUrl } from "../lib/safe-url";
 import {
   clearFocusTimerSnapshot,
   focusTimerResumeHref,
@@ -1367,7 +1368,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                   <button
                     type="button"
                     className="rounded-full border-2 border-primary-fixed-dim bg-white px-lg py-sm font-label-md text-label-md text-primary"
-                    onClick={() => window.open(selectedAssignment.htmlUrl || undefined, "_blank", "noopener,noreferrer")}
+                    onClick={() => openExternalUrl(selectedAssignment.htmlUrl)}
                   >
                     Open Canvas brief
                   </button>
@@ -1961,7 +1962,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                     <button
                       type="button"
                       className="bubbly-button rounded-full border-2 border-primary-fixed-dim bg-white px-md py-sm font-label-md text-label-md text-on-surface"
-                      onClick={() => window.open(selectedAssignment.htmlUrl || undefined, "_blank", "noopener,noreferrer")}
+                      onClick={() => openExternalUrl(selectedAssignment.htmlUrl)}
                     >
                       Open Canvas brief
                     </button>
@@ -2011,7 +2012,7 @@ export default function StudySessionsView(props: StudySessionsViewProps) {
                         type="button"
                         className="rounded-lg border border-surface-variant bg-surface-container-lowest p-sm text-left transition-all hover:border-primary active:scale-[0.99]"
                         onClick={() => {
-                          if (resource.url) window.open(resource.url, "_blank", "noopener,noreferrer");
+                          openExternalUrl(resource.url);
                         }}
                       >
                         <p className="font-label-lg text-label-lg font-bold text-primary">{resource.title}</p>

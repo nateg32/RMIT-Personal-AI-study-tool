@@ -4,16 +4,13 @@ import { useMemo, useState } from "react";
 import ViewHeader from "../components/ViewHeader";
 import type { AnnouncementSummary, CourseSummary, StudySidekickActions } from "../types";
 import { compactText, formatDate } from "../lib/client-utils";
+import { openExternalUrl } from "../lib/safe-url";
 
 type AnnouncementsViewProps = {
   announcements: AnnouncementSummary[];
   courses: CourseSummary[];
   actions: StudySidekickActions;
 };
-
-function openCanvas(url?: string | null) {
-  if (url) window.open(url, "_blank", "noopener,noreferrer");
-}
 
 export default function AnnouncementsView({ announcements, courses, actions }: AnnouncementsViewProps) {
   const [search, setSearch] = useState("");
@@ -68,7 +65,7 @@ export default function AnnouncementsView({ announcements, courses, actions }: A
                   ? "sticky-note bg-surface-container-lowest border-primary-fixed-dim"
                   : "bg-surface-container-lowest border-surface-variant"
               } border-2 p-md rounded-lg shadow-sm relative group cursor-pointer overflow-hidden`}
-              onClick={() => openCanvas(announcement.htmlUrl)}
+              onClick={() => openExternalUrl(announcement.htmlUrl)}
             >
               <div className="flex justify-between items-start mb-sm gap-sm">
                 <div className="flex flex-wrap items-center gap-sm">
@@ -95,7 +92,7 @@ export default function AnnouncementsView({ announcements, courses, actions }: A
                   className="text-primary font-label-md text-label-md flex items-center gap-xs group-hover:gap-sm transition-all"
                   onClick={(event) => {
                     event.stopPropagation();
-                    openCanvas(announcement.htmlUrl);
+                    openExternalUrl(announcement.htmlUrl);
                   }}
                 >
                   Read full update <span className="material-symbols-outlined">arrow_forward</span>

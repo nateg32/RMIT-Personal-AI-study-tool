@@ -70,7 +70,7 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
 
       setTicketId(payload.ticketId || null);
       setLastSubmittedAt(Date.now());
-      setMessage("Ticket sent to support@creatorbot.app.");
+      setMessage("Ticket sent to the configured support inbox.");
       setSubject("");
       setDescription("");
       setStepsToReproduce("");
@@ -102,7 +102,7 @@ export default function SupportView({ dashboard, actions }: SupportViewProps) {
             <h1 className="font-display-lg text-display-lg text-primary">Report an issue</h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant max-w-3xl mt-xs">
               Send a clean support ticket with what happened, where it happened, and what you tried. It goes straight
-              to support@creatorbot.app.
+              to the configured support inbox.
             </p>
           </div>
           <div className="bg-primary-container/30 border-2 border-primary-fixed-dim rounded-lg p-md">

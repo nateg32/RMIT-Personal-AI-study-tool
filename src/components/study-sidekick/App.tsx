@@ -98,7 +98,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const emptyDashboard: DashboardSummary = {
-  userName: "Nathaniel",
+  userName: "Demo Student",
   timezone: "Australia/Sydney",
   lastSyncAt: null,
   lastSuccessfulSyncAt: null,
@@ -319,7 +319,7 @@ function welcomeMessage(): ChatMessage {
     role: "assistant",
     createdAt: Date.now(),
     content:
-      "Hey Nathaniel. Ask me what is due, what changed, or ask me to create a study session. I can use safe study tools, but Canvas stays read-only.",
+      "Hey there. Ask me what is due, what changed, or ask me to create a study session. I can use safe study tools, but Canvas stays read-only.",
   };
 }
 

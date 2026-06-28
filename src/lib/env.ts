@@ -19,7 +19,9 @@ const envSchema = z.object({
   ALLOWED_EMAILS: z.string().optional(),
   APP_BASE_URL: optionalUrl,
   CANVAS_BASE_URL: optionalUrl.default("https://rmit.instructure.com"),
+  CANVAS_ALLOWED_HOSTS: z.string().optional(),
   CANVAS_ACCESS_TOKEN: z.string().optional(),
+  DEMO_MODE: z.string().optional(),
   ENCRYPTION_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
@@ -58,6 +60,17 @@ export function isSupabaseConfigured() {
 
 export function isProductionRuntime() {
   return env.NODE_ENV === "production" || env.VERCEL === "1";
+}
+
+export function isDemoModeEnabled() {
+  return ["1", "true", "yes"].includes((env.DEMO_MODE || "").trim().toLowerCase());
+}
+
+export function getCanvasAllowedHosts() {
+  return (env.CANVAS_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
 }
 
 export function getAllowedEmails() {

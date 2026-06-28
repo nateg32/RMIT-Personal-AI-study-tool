@@ -10,7 +10,6 @@ Required variables:
 - `DIRECT_URL` or Supabase Marketplace `POSTGRES_URL_NON_POOLING`
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
 
 Configure magic-link redirects in Supabase Auth to include:
 
@@ -28,9 +27,18 @@ Required variables:
 - `GEMINI_API_KEY` if AI generation is enabled
 - `GEMINI_MODEL` defaults to `gemini-2.5-flash`; `GEMINI_FALLBACK_MODELS` defaults to `gemini-2.5-flash,gemini-2.5-flash-lite`
 - `CANVAS_BASE_URL`
+- `CANVAS_ALLOWED_HOSTS`, defaulting to `*.instructure.com`
 - `RESEND_API_KEY` if Support Desk ticket emails should be sent
-- `SUPPORT_FROM_EMAIL` defaults to `Study Sidekick <support@creatorbot.app>`
-- `SUPPORT_TO_EMAIL` defaults to `support@creatorbot.app`
+- `SUPPORT_FROM_EMAIL`, defaulting to `RMIT Study Sidekick <support@example.com>`
+- `SUPPORT_TO_EMAIL`, defaulting to `support@example.com`
+
+Do not set `DEMO_MODE=true` in production. It is only for local UI previews without Supabase.
+
+Generate `ENCRYPTION_KEY` with 32 random bytes:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
 
 Vercel Cron calls `/api/cron/daily-brief`. The route rejects requests unless the `Authorization` header matches `Bearer ${CRON_SECRET}`.
 

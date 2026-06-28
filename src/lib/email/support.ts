@@ -50,8 +50,8 @@ export type SupportTicketEmailInput = {
 };
 
 export async function sendSupportTicketEmail(input: SupportTicketEmailInput) {
-  const to = env.SUPPORT_TO_EMAIL || "support@creatorbot.app";
-  const from = env.SUPPORT_FROM_EMAIL || "Study Sidekick <support@creatorbot.app>";
+  const to = env.SUPPORT_TO_EMAIL || "support@example.com";
+  const from = env.SUPPORT_FROM_EMAIL || "RMIT Study Sidekick <support@example.com>";
   const subject = `[Study Sidekick ${input.ticketId}] ${input.subject}`;
   const text = [
     `Ticket: ${input.ticketId}`,

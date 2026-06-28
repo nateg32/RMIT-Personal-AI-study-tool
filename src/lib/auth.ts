@@ -3,7 +3,7 @@ import type { User } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { cleanPersonName } from "@/lib/display";
-import { getAllowedEmails, isProductionRuntime, isSupabaseConfigured } from "@/lib/env";
+import { getAllowedEmails, isDemoModeEnabled, isProductionRuntime, isSupabaseConfigured } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export class AuthenticationRequiredError extends Error {
@@ -16,8 +16,8 @@ export class AuthenticationRequiredError extends Error {
 const demoUser = {
   id: "demo-user",
   supabaseUserId: null,
-  name: "Nathaniel",
-  email: "s4169571@student.rmit.edu.au",
+  name: "Demo Student",
+  email: "student@example.com",
   timezone: "Australia/Sydney",
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -37,6 +37,9 @@ export const getCurrentUser = cache(async (): Promise<User> => {
   if (!isSupabaseConfigured()) {
     if (isProductionRuntime()) {
       throw new Error("Supabase auth must be configured in production");
+    }
+    if (!isDemoModeEnabled()) {
+      throw new Error("Supabase auth is not configured. Set DEMO_MODE=true for local demo access.");
     }
     return demoUser;
   }

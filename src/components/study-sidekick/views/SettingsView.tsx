@@ -153,7 +153,7 @@ export default function SettingsView({
                     className="mt-xs w-full bg-white border-2 border-surface-variant rounded-lg p-sm font-body-md focus:outline-none focus:border-primary"
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value)}
-                    placeholder="Nathaniel"
+                    placeholder="Demo Student"
                     required
                   />
                 </label>

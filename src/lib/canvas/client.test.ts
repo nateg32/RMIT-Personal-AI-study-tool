@@ -16,6 +16,7 @@ describe("CanvasClient", () => {
       baseUrl: "https://canvas.test",
       token: "secret-token",
       fetcher: fetcher as unknown as typeof fetch,
+      allowedHosts: ["canvas.test"],
     });
 
     await expect(client.getAllPages<{ id: number }>("/api/v1/courses")).resolves.toEqual([
@@ -35,6 +36,7 @@ describe("CanvasClient", () => {
       baseUrl: "https://canvas.test",
       token: "secret-token",
       fetcher: fetcher as unknown as typeof fetch,
+      allowedHosts: ["canvas.test"],
     });
 
     await expect(client.request<{ id: number }>("/api/v1/users/self/profile")).resolves.toEqual({ id: 1 });
@@ -48,6 +50,7 @@ describe("CanvasClient", () => {
       baseUrl: "https://canvas.test",
       token: "Bearer 9595~abc\r\nDEF ",
       fetcher: fetcher as unknown as typeof fetch,
+      allowedHosts: ["canvas.test"],
     });
 
     await client.request<{ id: number }>("/api/v1/users/self/profile");
@@ -73,6 +76,7 @@ describe("CanvasClient", () => {
       baseUrl: "https://canvas.test",
       token: "secret-token",
       fetcher: fetcher as unknown as typeof fetch,
+      allowedHosts: ["canvas.test"],
     });
 
     await client.getAssignmentsWithSubmissions(123);
@@ -100,5 +104,37 @@ describe("CanvasClient", () => {
       expect.stringContaining("only_announcements=true"),
       expect.objectContaining({ headers: expect.any(Object) }),
     );
+  });
+
+  it("rejects hostile off-origin pagination before sending the token", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify([{ id: 1 }]), {
+        headers: { link: '<https://evil.test/api/v1/courses?page=2>; rel="next"' },
+      }),
+    );
+
+    const client = new CanvasClient({
+      baseUrl: "https://canvas.test",
+      token: "secret-token",
+      fetcher: fetcher as unknown as typeof fetch,
+      allowedHosts: ["canvas.test"],
+    });
+
+    await expect(client.getAllPages<{ id: number }>("/api/v1/courses")).rejects.toThrow(
+      /off-origin/i,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects non-HTTPS Canvas origins", () => {
+    expect(
+      () =>
+        new CanvasClient({
+          baseUrl: "http://canvas.test",
+          token: "secret-token",
+          fetcher: vi.fn() as unknown as typeof fetch,
+          allowedHosts: ["canvas.test"],
+        }),
+    ).toThrow(/https/i);
   });
 });

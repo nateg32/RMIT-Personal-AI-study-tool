@@ -1,5 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { requireEnv } from "@/lib/env";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { isProductionRuntime, requireEnv } from "@/lib/env";
 
 const algorithm = "aes-256-gcm";
 
@@ -7,7 +7,12 @@ function getKey() {
   const raw = requireEnv("ENCRYPTION_KEY");
   const maybeBase64 = Buffer.from(raw, "base64");
   if (maybeBase64.length === 32) return maybeBase64;
-  return createHash("sha256").update(raw).digest();
+
+  if (isProductionRuntime()) {
+    throw new Error("ENCRYPTION_KEY must be a 32-byte base64 value in production.");
+  }
+
+  throw new Error("ENCRYPTION_KEY must be generated with 32 random bytes and encoded as base64.");
 }
 
 export function encryptSecret(plainText: string) {
